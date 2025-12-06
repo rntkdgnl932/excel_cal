@@ -1,6 +1,8 @@
 # vat_excel_tool.py
 # 하비 브라운 전용: 부가세/할인 계산 + 엑셀 템플릿 채우기 (최종 수정: 기존 데이터 청소 기능 강화)
 
+
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional
@@ -542,6 +544,8 @@ def fill_delivery_template(
     wb.save(output_path)
 
 
+
+
 def fill_statement_template(
         template_path: Path,
         output_path: Path,
@@ -558,3 +562,10 @@ def fill_statement_template(
     _fill_statement_totals(ws, items)
 
     wb.save(output_path)
+
+
+
+
+
+
+
