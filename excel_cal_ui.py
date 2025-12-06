@@ -158,9 +158,12 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
             return line_edit
 
         # ex 폴더 기준
-        self.le_tpl_quote = make_tpl_row(0, "견적서 템플릿", "ex/견적서.xlsx")
-        self.le_tpl_delivery = make_tpl_row(1, "납품서 템플릿", "ex/납품서.xlsx")
-        self.le_tpl_statement = make_tpl_row(2, "거래명세표 템플릿", "ex/거래명세표.xlsx")
+
+        is_dir = "C:\\my_games\\excel_cal\\ex\\"
+
+        self.le_tpl_quote = make_tpl_row(0, "견적서 템플릿", is_dir + "견적서.xlsx")
+        self.le_tpl_delivery = make_tpl_row(1, "납품서 템플릿", is_dir + "납품서.xlsx")
+        self.le_tpl_statement = make_tpl_row(2, "거래명세표 템플릿", is_dir + "거래명세표.xlsx")
 
         main_layout.addWidget(grp_tpl)
 
@@ -409,9 +412,18 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
             statement_tpl = Path(self.le_tpl_statement.text().strip())
 
             # --- 거래처명/날짜 기준 폴더 생성 ---
+
+            is_dir = "C:\\my_games\\excel_cal"  # 백슬래시 두 개(\\) 혹은 r"..." 사용 권장
+
             safe_customer = re.sub(r'[\\/:*?"<>|]', "_", info.customer_name or "미정")
             safe_date = info.supply_date or "no_date"
-            out_dir = base_dir / "out" / f"{safe_date}_{safe_customer}"
+
+            # 문자열끼리 합칩니다.
+            temp_path_str = is_dir + "/out/" + f"{safe_date}_{safe_customer}"
+
+            # [핵심] mkdir을 쓰기 위해 문자열을 Path 객체로 변환합니다.
+            out_dir = Path(temp_path_str)
+
             out_dir.mkdir(parents=True, exist_ok=True)
 
             messages = []

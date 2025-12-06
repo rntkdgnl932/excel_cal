@@ -12,8 +12,7 @@ from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.cell.cell import MergedCell as _MC
-# 기존 import 아래에 이거 한 줄 추가하세요
-from openpyxl.styles import Alignment
+from openpyxl.styles import Alignment, Border, Side
 
 
 # --------------------- 공통 헬퍼 --------------------- #
@@ -271,6 +270,14 @@ def _write_items_to_sheet(ws, items: List[LineItemComputed]) -> Tuple[int, Heade
 
     _clear_body(ws, body_start)
 
+    # [수정] 모든 테두리를 얇은 실선으로 만드는 스타일 정의
+    thin_border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+
     for idx, item in enumerate(items, start=1):
         row = body_start + (idx - 1)
 
@@ -281,19 +288,26 @@ def _write_items_to_sheet(ws, items: List[LineItemComputed]) -> Tuple[int, Heade
             cell = ws.cell(row=row, column=col)
             if _is_merged(cell):
                 return
+
             cell.value = value
+
             # 숫자 포맷 적용
             if isinstance(value, (int, float)):
                 cell.number_format = '#,##0'
+
+            # [핵심 수정] 여기서 테두리를 강제로 얇게 설정합니다.
+            # 이중선(double)이 있어도 덮어씌워집니다.
+            cell.border = thin_border
+            # 글자 정렬도 깔끔하게 (가운데 정렬) - 필요 없으면 주석 처리
+            # cell.alignment = Alignment(horizontal='center', vertical='center')
 
         set_if("seq", idx)
         set_if("name", item.name)
         set_if("spec", item.spec)
         set_if("unit", "EA")
         set_if("qty", item.qty)
-        set_if("unit_price", item.unit_supply_discounted)  # 단가 열이 있을 경우
+        set_if("unit_price", item.unit_supply_discounted)
 
-        # 공급가/부가세/합계
         set_if("supply", item.supply_total)
         set_if("vat", item.vat_total)
         set_if("gross", item.gross_total)
@@ -358,6 +372,53 @@ def _fill_dates(ws, info: TradeInfo):
                 target.value = date_value
                 break
 
+
+# [추가] 거래명세표처럼 라벨 없이 "0000년 00월 00일" 형태를 찾아 바꾸는 함수
+def _fill_korean_style_date(ws: Worksheet, date_str: str):
+    """
+    YYYY-MM-DD 문자열을 받아 상단 영역(1~10행)에서
+    '년', '월', '일' 글자가 포함된 셀 근처의 숫자를 찾아 날짜를 업데이트합니다.
+    """
+    try:
+        dt = datetime.strptime(date_str, "%Y-%m-%d")
+        year, month, day = dt.year, dt.month, dt.day
+    except:
+        return  # 날짜 형식이 아니면 패스
+
+    # 상단 10줄만 탐색
+    for row in ws.iter_rows(min_row=1, max_row=10):
+        for cell in row:
+            if isinstance(cell, _MC) or cell.value is None:
+                continue
+
+            val = str(cell.value).strip()
+
+            # 1. 셀 자체가 "2024년" 처럼 되어 있는 경우
+            if "년" in val and "월" not in val:  # 년도만 있는 셀
+                # 숫자만 추출해서 교체 시도
+                new_val = val.replace(str(datetime.now().year), str(year))  # 현재 년도 -> 입력 년도
+                # 만약 못 찾았으면 그냥 통째로 "2025년"으로 교체 시도
+                # (정규식 등으로 더 정교하게 할 수 있으나 단순하게 처리)
+                if str(year) not in new_val:
+                    # 기존 값에 숫자가 있으면 그 숫자를 새 년도로 교체
+                    import re
+                    new_val = re.sub(r'\d+', str(year), val)
+                cell.value = new_val
+
+            elif "월" in val and "일" not in val and "년" not in val:  # 월만 있는 셀
+                import re
+                cell.value = re.sub(r'\d+', str(month), val)
+
+            elif "일" in val and "월" not in val:  # 일만 있는 셀
+                import re
+                cell.value = re.sub(r'\d+', str(day), val)
+
+            # 2. "2025년 8월 20일" 처럼 한 셀에 다 들어있는 경우
+            elif "년" in val and "월" in val and "일" in val:
+                cell.value = f"{year}년 {month}월 {day}일"
+
+            # 3. (옵션) 셀에는 "년"이라고만 적혀있고, 바로 왼쪽 셀이 숫자인 경우 (템플릿 구조에 따라 다름)
+            # 이 경우는 복잡하므로 위 1, 2번 케이스로 대부분 해결될 것입니다.
 
 def _fill_quote_total(ws, items: List[LineItemComputed]) -> None:
     # 1. 총액 계산
@@ -544,8 +605,6 @@ def fill_delivery_template(
     wb.save(output_path)
 
 
-
-
 def fill_statement_template(
         template_path: Path,
         output_path: Path,
@@ -556,7 +615,12 @@ def fill_statement_template(
     ws = wb.active
 
     _fill_common_replace(ws, info)
+
+    # 기존 날짜 함수 (라벨 찾는 방식) - 혹시 모르니 유지
     _fill_dates(ws, info)
+
+    # [추가] 라벨 없이 년/월/일 글자 찾아서 날짜 바꾸는 함수 실행
+    _fill_korean_style_date(ws, info.supply_date)
 
     _write_items_to_sheet(ws, items)
     _fill_statement_totals(ws, items)
