@@ -899,6 +899,17 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
                 new_data.to_excel(excel_file_name, index=False, engine="openpyxl")
                 # writer_1.save()
 
+                # === 추가: 품목 전체 표기 버전 엑셀도 함께 저장 ===
+                # new_data에는 dd(품목명)가 잘린 버전, gagin(각인)에 전체 문구가 들어있다.
+                new_data_full = new_data.copy()
+                if gagin in new_data_full.columns:
+                    # '품목명' 컬럼에 '각인'에 들어있는 전체 내용을 그대로 넣어준다.
+                    new_data_full[dd] = new_data_full[gagin]
+
+                excel_file_name_full = dir_path + last + "네이버_송장발부_전체.xlsx"
+                new_data_full.to_excel(excel_file_name_full, index=False, engine="openpyxl")
+
+
                 excel_file_name = dir_path + last + "네이버_발송처리.xlsx"
                 # df.to_excel(excel_file_name, index=False)
                 # writer_2 = pd.ExcelWriter(excel_file_name, options={'strings_to_urls': False})
@@ -1273,6 +1284,15 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
                 new_data[nn] = new_data[nn].astype(str)
                 new_data.to_excel(excel_file_name, index=False, engine="openpyxl")
                 # writer_1.save()
+
+                # === 추가: 품목 전체 표기 버전 엑셀도 함께 저장 ===
+                new_data_full = new_data.copy()
+                if gagin in new_data_full.columns:
+                    new_data_full[dd] = new_data_full[gagin]
+
+                excel_file_name_full = dir_path + last + "쿠팡_송장발부_전체.xlsx"
+                new_data_full.to_excel(excel_file_name_full, index=False, engine="openpyxl")
+
 
                 # self는 현재 클래스(ExcelCalWindow)를 의미합니다.
                 QtWidgets.QMessageBox.information(self, '엑셀로 저장', '엑셀 파일로 저장했습니다. 꼬꼬님')
