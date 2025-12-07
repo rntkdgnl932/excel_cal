@@ -131,39 +131,45 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         main_layout.addWidget(grp_total)
 
         # ------------------------------------------------------------------
-        # 엑셀 템플릿 경로
+        # 엑셀 템플릿 경로  (절대 경로 고정)
         # ------------------------------------------------------------------
         grp_tpl = QtWidgets.QGroupBox("엑셀 템플릿 파일 (기존 양식)")
         layout_tpl = QtWidgets.QGridLayout(grp_tpl)
 
-        def make_tpl_row(row: int, label_text: str, default_name: str):
+        # 절대 경로 고정
+        self.TEMPLATE_DIR = Path(r"C:\my_games\excel_cal\ex")
+
+        def make_tpl_row(row: int, label_text: str, filename: str):
             label_widget = QtWidgets.QLabel(label_text)
-            line_edit = QtWidgets.QLineEdit(str(base_dir / default_name))
+
+            # 항상 C:\my_games\excel_cal\ex\ 아래 파일을 기본값으로 사용
+            abs_path = self.TEMPLATE_DIR / filename
+            line_edit = QtWidgets.QLineEdit(str(abs_path))
+
             btn = QtWidgets.QPushButton("찾기...")
 
             def browse():
+                # 필요하면 다른 위치의 템플릿을 쓸 수 있도록 탐색은 그대로 둠
                 path, _ = QtWidgets.QFileDialog.getOpenFileName(
                     self,
                     f"{label_text} 템플릿 선택",
-                    str(base_dir),
+                    str(self.TEMPLATE_DIR),
                     "Excel Files (*.xlsx *.xlsm *.xltx *.xltm)",
                 )
                 if path:
                     line_edit.setText(path)
 
             btn.clicked.connect(browse)
+
             layout_tpl.addWidget(label_widget, row, 0)
             layout_tpl.addWidget(line_edit, row, 1)
             layout_tpl.addWidget(btn, row, 2)
             return line_edit
 
-        # ex 폴더 기준
-
-        is_dir = "C:\\my_games\\excel_cal\\ex\\"
-
-        self.le_tpl_quote = make_tpl_row(0, "견적서 템플릿", is_dir + "견적서.xlsx")
-        self.le_tpl_delivery = make_tpl_row(1, "납품서 템플릿", is_dir + "납품서.xlsx")
-        self.le_tpl_statement = make_tpl_row(2, "거래명세표 템플릿", is_dir + "거래명세표.xlsx")
+        # 여기서 파일명만 넘기면 위에서 절대경로로 붙인다.
+        self.le_tpl_quote = make_tpl_row(0, "견적서 템플릿", "견적서.xlsx")
+        self.le_tpl_delivery = make_tpl_row(1, "납품서 템플릿", "납품서.xlsx")
+        self.le_tpl_statement = make_tpl_row(2, "거래명세표 템플릿", "거래명세표.xlsx")
 
         main_layout.addWidget(grp_tpl)
 
@@ -406,31 +412,25 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         try:
             info, items_computed = self._ensure_items_computed()
 
-            base_dir = Path(__file__).resolve().parent
+            # 템플릿 경로는 UI에 적힌 값(기본은 C:\my_games\excel_cal\ex\...)
             quote_tpl = Path(self.le_tpl_quote.text().strip())
             delivery_tpl = Path(self.le_tpl_delivery.text().strip())
             statement_tpl = Path(self.le_tpl_statement.text().strip())
 
-            # --- 거래처명/날짜 기준 폴더 생성 ---
+            # --- [변경] 결과 저장 폴더: 절대 경로 C:\my_games\excel_cal\out ---
+            out_base = Path(r"C:\my_games\excel_cal\out")
+            out_base.mkdir(parents=True, exist_ok=True)
 
-            is_dir = "C:\\my_games\\excel_cal"  # 백슬래시 두 개(\\) 혹은 r"..." 사용 권장
-
+            # 파일명 구분용 prefix (공급일자_거래처명_)
             safe_customer = re.sub(r'[\\/:*?"<>|]', "_", info.customer_name or "미정")
             safe_date = info.supply_date or "no_date"
-
-            # 문자열끼리 합칩니다.
-            temp_path_str = is_dir + "/out/" + f"{safe_date}_{safe_customer}"
-
-            # [핵심] mkdir을 쓰기 위해 문자열을 Path 객체로 변환합니다.
-            out_dir = Path(temp_path_str)
-
-            out_dir.mkdir(parents=True, exist_ok=True)
+            prefix = f"{safe_date}_{safe_customer}_"  # 예: 2025-12-08_하비브라운_
 
             messages = []
 
             if do_quote:
                 if quote_tpl.is_file():
-                    out_path = out_dir / "견적서_자동생성.xlsx"
+                    out_path = out_base / f"{prefix}견적서_자동생성.xlsx"
                     fill_quote_template(quote_tpl, out_path, info, items_computed)
                     messages.append(f"견적서: {out_path}")
                 else:
@@ -438,7 +438,7 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
 
             if do_delivery:
                 if delivery_tpl.is_file():
-                    out_path = out_dir / "납품서_자동생성.xlsx"
+                    out_path = out_base / f"{prefix}납품서_자동생성.xlsx"
                     fill_delivery_template(delivery_tpl, out_path, info, items_computed)
                     messages.append(f"납품서: {out_path}")
                 else:
@@ -446,7 +446,7 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
 
             if do_statement:
                 if statement_tpl.is_file():
-                    out_path = out_dir / "거래명세표_자동생성.xlsx"
+                    out_path = out_base / f"{prefix}거래명세표_자동생성.xlsx"
                     fill_statement_template(statement_tpl, out_path, info, items_computed)
                     messages.append(f"거래명세표: {out_path}")
                 else:
@@ -461,7 +461,7 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
                     "완료",
                     "다음 위치에 파일이 생성되었습니다.\n\n"
                     + "\n".join(str(m) for m in messages)
-                    + "\n\n※ 기본 저장 위치: out/공급일자_거래처명 폴더",
+                    + "\n\n※ 기본 저장 위치: C:\\my_games\\excel_cal\\out",
                 )
 
         except Exception as e:
