@@ -137,12 +137,13 @@ class LineItemInput:
 
 @dataclass
 class LineItemComputed(LineItemInput):
-    unit_supply_original: int
-    unit_discounted_gross: int
-    unit_supply_discounted: int
-    supply_total: int
-    vat_total: int
-    gross_total: int
+    unit_supply_original: int          # 할인 전 1개당 공급가
+    unit_discounted_gross: int         # 할인 후 1개당 (부가세 포함) 금액
+    unit_supply_discounted: int        # 할인 후 1개당 공급가(부가세 제외)
+    unit_vat: int                      # ✅ 할인 후 1개당 부가세
+    supply_total: int                  # 전체 공급가(합계)
+    vat_total: int                     # 전체 부가세(합계)
+    gross_total: int                   # 전체 합계(공급가+부가세)
 
 
 HeaderMap = Dict[str, int]
@@ -162,6 +163,7 @@ def compute_items_with_vat(
         unit_supply_original = round(it.unit_gross / (1 + rate_vat))
         unit_discounted_gross = round(it.unit_gross * (1 - it.discount_rate / 100.0))
         unit_supply_discounted = round(unit_discounted_gross / (1 + rate_vat))
+        unit_vat = unit_discounted_gross - unit_supply_discounted   # ✅ 1개당 부가세
 
         gross_total = unit_discounted_gross * it.qty
         supply_total = round(gross_total / (1 + rate_vat))
@@ -177,12 +179,14 @@ def compute_items_with_vat(
                 unit_supply_original=unit_supply_original,
                 unit_discounted_gross=unit_discounted_gross,
                 unit_supply_discounted=unit_supply_discounted,
+                unit_vat=unit_vat,                    # ✅ 추가
                 supply_total=supply_total,
                 vat_total=vat_total,
                 gross_total=gross_total,
             )
         )
     return result
+
 
 
 # ---------------------------------------------------------------------------
@@ -306,10 +310,12 @@ def _write_items_to_sheet(ws, items: List[LineItemComputed]) -> Tuple[int, Heade
         set_if("spec", item.spec)
         set_if("unit", "EA")
         set_if("qty", item.qty)
-        set_if("unit_price", item.unit_supply_discounted)
+        # 단가/공급가/부가세를 1개당 기준으로 표시
+        set_if("unit_price", item.unit_supply_discounted)  # (그대로 사용)
+        set_if("supply", item.unit_supply_discounted)  # ✅ 1개당 공급가
+        set_if("vat", item.unit_vat)  # ✅ 1개당 부가세
 
-        set_if("supply", item.supply_total)
-        set_if("vat", item.vat_total)
+        # 합계금액은 기존처럼 전체 금액
         set_if("gross", item.gross_total)
 
     return header_row, col_map
