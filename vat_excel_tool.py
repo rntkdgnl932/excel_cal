@@ -10,10 +10,9 @@ from datetime import datetime
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
-from openpyxl.worksheet.worksheet import Worksheet
 from openpyxl.cell.cell import MergedCell as _MC
 from openpyxl.styles import Alignment, Border, Side
-
+from openpyxl.worksheet.worksheet import Worksheet
 
 # --------------------- 공통 헬퍼 --------------------- #
 
@@ -426,78 +425,60 @@ def _fill_korean_style_date(ws: Worksheet, date_str: str):
             # 3. (옵션) 셀에는 "년"이라고만 적혀있고, 바로 왼쪽 셀이 숫자인 경우 (템플릿 구조에 따라 다름)
             # 이 경우는 복잡하므로 위 1, 2번 케이스로 대부분 해결될 것입니다.
 
-def _fill_quote_total(ws, items: List[LineItemComputed]) -> None:
-    # 1. 총액 계산
-    total_gross = int(sum(it.gross_total for it in items))
 
-    # 2. "견적금액" 라벨 찾기
+def _get_writable_cell(ws: Worksheet, coord: str):
+    """
+    병합된 셀 범위 안의 좌표가 들어오면,
+    항상 '왼쪽 위 대표 셀'을 돌려준다.
+    (MergedCell 에 직접 쓰다가 나는 에러 방지용)
+    """
+    cell = ws[coord]
+    if not isinstance(cell, MergedCell):
+        return cell
+
+    # 병합 범위들 중에서 이 좌표가 들어있는 범위를 찾는다.
+    for mr in ws.merged_cells.ranges:
+        if coord in mr:
+            return ws.cell(row=mr.min_row, column=mr.min_col)
+
+    # 혹시 못 찾으면 그냥 원래 셀 그대로 반환
+    return cell
+
+def _fill_quote_total(ws, items: List[LineItemComputed]) -> None:
+    total = int(sum(it.gross_total for it in items))
+
+    # "견적금액"이 있는 행 찾기 그대로 유지
     label_row = None
-    start_col = None
-    for row in ws.iter_rows(min_row=1, max_row=20):
+    for row in ws.iter_rows(min_row=1, max_row=30):
         for cell in row:
             if isinstance(cell.value, str) and "견적금액" in _normalize(cell.value):
                 label_row = cell.row
-                start_col = cell.column
                 break
-        if label_row: break
+        if label_row is not None:
+            break
 
-    if not label_row: return
+    if label_row is None:
+        return
 
-    # 3. 데이터 들어갈 칸 탐색 (기존 템플릿의 흔적을 찾아서 위치 잡기)
-    number_col = None
-    text_col = None
+    row = label_row
 
-    # 라벨 오른쪽부터 끝까지 훑으면서 '숫자 칸'과 '한글 칸' 위치 추적
-    for col in range(start_col + 1, ws.max_column + 1):
-        cell = ws.cell(row=label_row, column=col)
-        if isinstance(cell, MergedCell): continue
+    # 병합 대응 헬퍼로 숫자 / 한글 셀 가져오기
+    cell_number = _get_writable_cell(ws, f"H{row}")   # 합계 숫자 들어가는 칸
+    cell_korean = _get_writable_cell(ws, f"M{row}")   # 한글 "( ... )" 들어가는 칸
 
-        val = str(cell.value).strip() if cell.value else ""
+    # --- 여기부터가 핵심 수정 ---
 
-        # (A) 숫자 칸 후보: 숫자가 있거나(704...), ₩ 표시가 있는 칸
-        if not number_col:
-            clean_val = val.replace(",", "").replace("₩", "").replace(".", "")
-            if clean_val.isdigit() and len(clean_val) > 0:
-                number_col = col
-                continue
+    # 1) 숫자 셀: 값 + 서식에 ₩ 포함
+    cell_number.value = total
+    cell_number.number_format = '"₩" #,##0'   # => ₩ 7,040,000
 
-        # (B) 한글 칸 후보: 괄호 '(', '원정', '일금' 등이 있는 칸
-        if not text_col:
-            if any(k in val for k in ["원정", "일금", "(", "###", "NUM"]):
-                text_col = col
-                continue
+    # 2) 한글 셀: 너가 바꾼 형식 유지
+    korean_money = _int_to_korean_amount(total)
+    cell_korean.value = f" {korean_money} "
+    cell_korean.alignment = Alignment(horizontal="center", vertical="center")
 
-    # 위치를 못 찾았으면 대충 라벨 바로 옆(숫자), 그 옆옆(한글)로 지정
-    if not number_col: number_col = start_col + 1
-    if not text_col: text_col = number_col + 2
 
-    # 4. [청소] 해당 줄의 데이터 영역 싹 지우기 (중복 방지)
-    for col in range(start_col + 1, ws.max_column + 1):
-        cell = ws.cell(row=label_row, column=col)
-        if isinstance(cell, MergedCell): continue
-        # 내가 쓸 칸이 아니면 내용은 다 지움
-        if col != number_col and col != text_col:
-            cell.value = ""
 
-    # 5. [입력 & 꾸미기]
-    # (1) 숫자 입력 (오른쪽 정렬 or 가운데 정렬)
-    num_cell = ws.cell(row=label_row, column=number_col)
-    if not isinstance(num_cell, MergedCell):
-        num_cell.value = total_gross
-        num_cell.number_format = '#,##0'
-        # 숫자는 보통 오른쪽 정렬이 예쁘지만, 템플릿에 따라 가운데가 나을 수도 있음
-        # 여기선 기존 서식을 최대한 따르되, 값이 잘 보이게 설정
-        # num_cell.alignment = Alignment(horizontal='right', vertical='center') # 필요시 주석 해제
-
-    # (2) 한글 입력 (가운데 정렬로 예쁘게)
-    kr_text = _int_to_korean_amount(total_gross)
-    full_text = f"( 일금 {kr_text} 원정 )"
-
-    txt_cell = ws.cell(row=label_row, column=text_col)
-    if not isinstance(txt_cell, MergedCell):
-        txt_cell.value = full_text
-        # [핵심] 텍스트가 셀 중앙에 예쁘게 오도록 강제 정렬
-        txt_cell.alignment = Alignment(horizontal='center', vertical='center')
 
 
 def _fill_statement_totals(ws: Worksheet, items: List[LineItemComputed]) -> None:
@@ -568,6 +549,44 @@ def _fill_delivery_totals(
 # ---------------------------------------------------------------------------
 
 
+
+def _fill_quote_header_dates(ws: Worksheet) -> None:
+    """견적서 상단의 '견적번호'와 '견적일자'를 오늘 기준으로 채웁니다.
+    - 견적번호: HHMMSS
+    - 견적일자: YYYY-MM-DD
+    템플릿에서 해당 라벨 오른쪽의 첫 번째 비-병합 셀에 값을 씁니다.
+    """
+    now = datetime.now()
+    date_str = now.strftime("%Y-%m-%d")   # {연}-{월}-{일}
+    num_str = now.strftime("%H%M%S")      # {시}{분}{초}
+
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row, max_col=ws.max_column):
+        for cell in row:
+            v = cell.value
+            if not isinstance(v, str):
+                continue
+            t = _normalize(v)
+            r = cell.row
+
+            # 견적일자 → 오늘 날짜
+            if "견적일자" in t:
+                for c in range(cell.column + 1, ws.max_column + 1):
+                    target = ws.cell(row=r, column=c)
+                    if _is_merged(target):
+                        continue
+                    # 기존 값이 있어도 오늘 날짜로 덮어씀
+                    target.value = date_str
+                    break
+
+            # 견적번호 → HHMMSS
+            elif "견적번호" in t:
+                for c in range(cell.column + 1, ws.max_column + 1):
+                    target = ws.cell(row=r, column=c)
+                    if _is_merged(target):
+                        continue
+                    target.value = num_str
+                    break
+
 def fill_quote_template(
         template_path: Path,
         output_path: Path,
@@ -578,7 +597,8 @@ def fill_quote_template(
     ws = wb.active
 
     _fill_common_replace(ws, info)
-    _fill_dates(ws, info)
+    _fill_dates(ws, info)              # 공급일자/납품일 등은 기존 로직 유지
+    _fill_quote_header_dates(ws)       # ✅ 견적번호/견적일자만 오늘 기준으로 덮어쓰기
 
     _set_value_right_of_label(ws, "납품장소", info.customer_name)
     _set_value_right_of_label(ws, "납기일자", "시안 확정 후 영업일 기준 10일 내외")
@@ -588,6 +608,7 @@ def fill_quote_template(
     _fill_footer_totals_common(ws, items)
 
     wb.save(output_path)
+
 
 
 def fill_delivery_template(
