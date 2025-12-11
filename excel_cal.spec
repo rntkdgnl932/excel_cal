@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['excel_cal_ui.py'],
+    ['excel_ui.py'],
     pathex=[],
     binaries=[],
     datas=[('icon.ico', '.')],
