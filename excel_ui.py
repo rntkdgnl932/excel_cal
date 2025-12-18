@@ -9,6 +9,7 @@ from PyQt5 import QtWidgets
 
 from excel_cal_ui import ExcelCalWindow      # 기존 부가세/3종 엑셀 UI
 from read_excel import ReadInvoiceWidget     # 송장 읽기 탭
+from schedule import ScheduleWidget
 
 
 class UpdateWidget(QtWidgets.QWidget):
@@ -147,32 +148,12 @@ class UpdateWidget(QtWidgets.QWidget):
         git pull 실행 (origin 기준, 기본 브랜치).
         - pull 성공 시: 프로그램 자동 재시작
         """
-        self._append_log("=" * 60)
-        self._append_log("[정보] git pull 실행 시작")
-
-        # 버튼 잠깐 비활성화 (중복 클릭 방지)
-        self.btn_refresh.setEnabled(False)
-        self.btn_pull.setEnabled(False)
-
-        try:
-            proc = self._run_git(["pull", "--ff-only"])
-            if proc and proc.returncode == 0:
-                self._append_log("[성공] git pull이 정상적으로 완료되었습니다.")
-                # 알림창
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "업데이트 완료",
-                    "코드 업데이트가 완료되었습니다.\n프로그램을 다시 시작합니다."
-                )
-                # 재시작 로직
-                self._restart_app()
-            else:
-                self._append_log("[주의] git pull 도중 문제가 발생했습니다. 위 로그를 확인하세요.")
-        finally:
-            # pull 성공 시에는 _restart_app()에서 종료되므로
-            # 여기 버튼 재활성화는 실패/예외 케이스용
-            self.btn_refresh.setEnabled(True)
-            self.btn_pull.setEnabled(True)
+        import git
+        import os
+        my_repo = git.Repo()
+        my_repo.remotes.origin.pull()
+        # 실행 후 재시작 부분
+        os.execl(sys.executable, sys.executable, *sys.argv)
 
     # ---------------------------
     # 재시작 로직
@@ -220,7 +201,11 @@ class MainTabbedWindow(QtWidgets.QMainWindow):
         self.read_invoice_widget = ReadInvoiceWidget(self)
         tabs.addTab(self.read_invoice_widget, "네이버·쿠팡 송장 엑셀 읽기")
 
-        # 3. Git 업데이트 탭
+        # 3. 스케쥴 탭 (추가)
+        self.schedule_widget = ScheduleWidget(self)
+        tabs.addTab(self.schedule_widget, "스케쥴")
+
+        # 4. Git 업데이트 탭
         base_dir = Path(__file__).resolve().parent  # 보통 C:\my_games\excel_cal
         self.update_widget = UpdateWidget(base_dir, self)
         tabs.addTab(self.update_widget, "업데이트 (git pull)")
