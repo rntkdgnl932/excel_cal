@@ -8,11 +8,158 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass, asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Callable
 
 from PyQt5 import QtWidgets, QtCore, QtGui
+
+# =========================================================
+# Google Calendar Sync (OAuth Desktop)
+#   - client_secret.json / token.json 경로를 고정
+#   - all-day event로 생성/수정/삭제
+# =========================================================
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+
+SCOPES = ["https://www.googleapis.com/auth/calendar"]
+
+
+
+
+#########################################################
+
+import os
+import sys
+import faulthandler
+from datetime import datetime
+from pathlib import Path
+
+# =========================
+# Crash logging (file-based)
+# =========================
+_LOG_DIR = Path(r"C:\my_games\excel_cal\log")
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+_CRASH_MARK_PATH = _LOG_DIR / "crash_mark.log"
+_EXCEPTION_DUMP_PATH = _LOG_DIR / "exception_dump.log"
+_CRASH_DUMP_PATH = _LOG_DIR / "crash_dump.log"
+
+# faulthandler: 파이썬이 잡을 수 있는 크래시/덤프가 있으면 여기에 기록
+_fh = open(_CRASH_DUMP_PATH, "a", buffering=1, encoding="utf-8")
+faulthandler.enable(file=_fh, all_threads=True)
+
+def _crash_mark(msg: str) -> None:
+    """네이티브 크래시 직전 위치 파악용: flush+fsync로 강제 기록"""
+    try:
+        with _CRASH_MARK_PATH.open("a", encoding="utf-8") as f:
+            f.write(f"{datetime.now().isoformat(timespec='seconds')} | {msg}\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception:
+        pass
+
+def _dump_exception(exctype, value, tb) -> None:
+    """파이썬 예외는 무조건 파일로 남김"""
+    try:
+        import traceback
+        with _EXCEPTION_DUMP_PATH.open("a", encoding="utf-8") as f:
+            f.write("".join(traceback.format_exception(exctype, value, tb)))
+            f.write("\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except Exception:
+        pass
+
+# 메인 스레드 예외
+sys.excepthook = _dump_exception
+
+
+
+##########################################################
+
+
+
+
+
+
+
+class GoogleCalendarSync:
+    def __init__(self, secrets_dir: Path, calendar_id: str = "primary"):
+        self.secrets_dir = Path(secrets_dir)
+        self.calendar_id = calendar_id
+
+        self.client_secret_path = self.secrets_dir / "client_secret.json"
+        self.token_path = self.secrets_dir / "token.json"
+
+    # ✅ 1) UI 스레드에서만 호출: 최초 로그인/승인(브라우저 열림)
+    def authorize_interactive(self) -> None:
+        if not self.secrets_dir.exists():
+            self.secrets_dir.mkdir(parents=True, exist_ok=True)
+
+        if not self.client_secret_path.is_file():
+            raise FileNotFoundError(f"client_secret.json을 찾을 수 없습니다: {self.client_secret_path}")
+
+        flow = InstalledAppFlow.from_client_secrets_file(str(self.client_secret_path), SCOPES)
+        creds = flow.run_local_server(port=0)  # ✅ UI 스레드에서만!
+
+        self.token_path.write_text(creds.to_json(), encoding="utf-8")
+
+    # ✅ 2) 워커 스레드에서도 안전: token.json만 읽어서 service 생성
+    def build_service(self):
+        if not self.token_path.is_file():
+            raise FileNotFoundError(
+                f"token.json이 없습니다. 먼저 '구글 연동'을 완료해야 합니다.\n{self.token_path}"
+            )
+
+        creds = Credentials.from_authorized_user_file(str(self.token_path), SCOPES)
+
+        # 토큰 만료 시 refresh(브라우저 안 열림)
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+            self.token_path.write_text(creds.to_json(), encoding="utf-8")
+
+        return build("calendar", "v3", credentials=creds)
+
+    # ---------- CRUD ----------
+    def create_event(self, service, item: "ScheduleItem") -> str:
+        # all-day 이벤트의 end.date는 "다음날"이어야 정상(구글 규칙)
+        start_date = item.date  # "YYYY-MM-DD"
+        qd = datetime.fromisoformat(start_date).date()
+        end_date = (qd + timedelta(days=1)).isoformat()
+
+        body = {
+            "summary": (f"[완료] {item.title}" if item.completed else item.title),
+            "description": item.content or "",
+            "start": {"date": start_date},
+            "end": {"date": end_date},
+        }
+        created = service.events().insert(calendarId=self.calendar_id, body=body).execute()
+        return str(created.get("id", ""))
+
+    def update_event(self, service, event_id: str, item: "ScheduleItem") -> None:
+        if not event_id:
+            return
+
+        start_date = item.date
+        qd = datetime.fromisoformat(start_date).date()
+        end_date = (qd + timedelta(days=1)).isoformat()
+
+        body = {
+            "summary": (f"[완료] {item.title}" if item.completed else item.title),
+            "description": item.content or "",
+            "start": {"date": start_date},
+            "end": {"date": end_date},
+        }
+        service.events().update(calendarId=self.calendar_id, eventId=event_id, body=body).execute()
+
+    def delete_event(self, service, event_id: str) -> None:
+        if not event_id:
+            return
+        service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()
+
 
 
 def _now_iso() -> str:
@@ -30,6 +177,10 @@ class ScheduleItem:
     title: str
     content: str
     completed: bool = False
+
+    # ✅ 구글 캘린더 이벤트 ID (구글에 이벤트 만들면 응답으로 오는 id)
+    google_event_id: str = ""
+
     created_at: str = ""
     updated_at: str = ""
 
@@ -41,9 +192,14 @@ class ScheduleItem:
             title=str(d.get("title", "")),
             content=str(d.get("content", "")),
             completed=bool(d.get("completed", False)),
+
+            # ✅ 기존 json에 없을 수 있으니 default ""로 안전 처리
+            google_event_id=str(d.get("google_event_id", "")),
+
             created_at=str(d.get("created_at", "")),
             updated_at=str(d.get("updated_at", "")),
         )
+
 
 
 class ScheduleStore:
@@ -363,6 +519,13 @@ class ScheduleWidget(QtWidgets.QWidget):
         self.store = ScheduleStore(self._data_path)
         self.store.load()
 
+        # ✅ Google Calendar 연동 (필요할 때만 초기화)
+        # ✅ Google Calendar 연동 경로 먼저
+        self._gcal_secrets_dir = Path(r"C:\my_games\excel_cal\secrets")
+
+        # ✅ gcal 객체 생성 (여기서는 브라우저 열지 않음)
+        self._gcal = GoogleCalendarSync(self._gcal_secrets_dir, calendar_id="primary")
+
         root = QtWidgets.QHBoxLayout(self)
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(12)
@@ -489,6 +652,20 @@ class ScheduleWidget(QtWidgets.QWidget):
         self._refresh_all_list()
         self._select_first_item_if_any()
         self._refresh_calendar_view()
+        self._gcal_service = None  # ✅ 추가: 서비스 캐시
+
+        try:
+            # token.json 없으면 여기서만 브라우저로 로그인
+            if not (self._gcal_secrets_dir / "token.json").exists():
+                QtWidgets.QMessageBox.information(self, "구글 연동", "처음 1회 구글 캘린더 연동이 필요합니다.")
+                self._gcal.authorize_interactive()
+
+            # ✅ 추가: UI 스레드에서 서비스 1회 생성(여기서 크래시/인증 이슈를 미리 잡음)
+            self._gcal_service = self._gcal.build_service()
+
+        except Exception as e:
+            self._gcal_service = None
+            QtWidgets.QMessageBox.warning(self, "구글 연동 실패", str(e))
 
     # ---------- Calendar data ----------
     def _get_items_for_date_for_calendar(self, date_str: str) -> List[ScheduleItem]:
@@ -601,6 +778,13 @@ class ScheduleWidget(QtWidgets.QWidget):
         it = self.store.items.get(item_id)
         self._render_detail(it)
 
+    def _ensure_gcal(self) -> Optional[GoogleCalendarSync]:
+        if self._gcal is not None:
+            return self._gcal
+        # 여기서는 UI를 띄우지 말고, 호출자가 처리하게 만든다.
+        self._gcal = GoogleCalendarSync(self._gcal_secrets_dir, calendar_id="primary")
+        return self._gcal
+
     def _on_add_clicked(self) -> None:
         date_str = self._selected_date_str()
         dlg = ScheduleEditDialog(self, mode="add", initial_date=date_str, item=None)
@@ -608,15 +792,42 @@ class ScheduleWidget(QtWidgets.QWidget):
             return
 
         d, title, content, completed = dlg.get_values()
-        self.store.add(d, title, content, completed)
 
-        qd = QtCore.QDate.fromString(d, "yyyy-MM-dd")
-        if qd.isValid():
-            self.calendar.setSelectedDate(qd)
+        def job(progress):
+            progress({"stage": "local", "msg": "[local] 로컬 저장 중..."})
+            it = self.store.add(d, title, content, completed)
 
-        self._refresh_day_list()
-        self._refresh_all_list()
-        self._refresh_calendar_view()
+            progress({"stage": "gcal", "msg": "[gcal] 구글 캘린더 이벤트 생성 중..."})
+            try:
+                gcal = self._ensure_gcal()
+                if gcal:
+                    service = gcal.build_service()
+                    event_id = gcal.create_event(service, it)
+                    if event_id:
+                        it.google_event_id = event_id
+                        self.store.save()
+            except Exception as e:
+                progress({"stage": "gcal", "msg": f"[gcal][warn] 구글 반영 실패: {e}"})
+
+            progress({"stage": "done", "msg": "[done] 완료"})
+            return {"date": d, "new_id": it.id}
+
+        def done(ok, payload, err):
+            if not ok:
+                QtWidgets.QMessageBox.warning(self, "추가 실패", f"{err}")
+                return
+
+            d2 = payload.get("date") if isinstance(payload, dict) else None
+            if d2:
+                qd = QtCore.QDate.fromString(d2, "yyyy-MM-dd")
+                if qd.isValid():
+                    self.calendar.setSelectedDate(qd)
+
+            self._refresh_day_list()
+            self._refresh_all_list()
+            self._refresh_calendar_view()
+
+        self._run_async("스케쥴 추가", job, done)
 
     def _on_edit_clicked(self) -> None:
         item_id = self._get_selected_all_item_id()
@@ -633,43 +844,110 @@ class ScheduleWidget(QtWidgets.QWidget):
             return
 
         d, title, content, completed = dlg.get_values()
-        self.store.update(item_id, date=d, title=title, content=content, completed=completed)
 
-        qd = QtCore.QDate.fromString(d, "yyyy-MM-dd")
-        if qd.isValid():
-            self.calendar.setSelectedDate(qd)
+        def job(progress):
+            progress({"stage": "local", "msg": "[local] 로컬 수정 저장 중..."})
+            self.store.update(item_id, date=d, title=title, content=content, completed=completed)
 
-        self._refresh_day_list()
-        self._refresh_all_list()
-        self._refresh_calendar_view()
+            updated = self.store.items.get(item_id)
+
+            progress({"stage": "gcal", "msg": "[gcal] 구글 캘린더 반영 중..."})
+            service = self._gcal.build_service()
+            if service is None:
+                raise RuntimeError("구글 캘린더 서비스가 준비되지 않았습니다. (연동 상태를 확인하세요)")
+
+            if updated:
+                if updated.google_event_id:
+                    # 기존 이벤트가 있으면 update
+                    self._gcal.update_event(service, updated.google_event_id, updated)
+                else:
+                    # 기존 이벤트 id 없으면 create 후 저장
+                    event_id = self._gcal.create_event(service, updated)
+                    if event_id:
+                        updated.google_event_id = event_id
+                        self.store.save()
+
+            progress({"stage": "done", "msg": "[done] 완료"})
+            return {"date": d, "id": item_id}
+
+        def done(ok, payload, err):
+            if not ok:
+                QtWidgets.QMessageBox.warning(self, "수정 실패", f"{err}")
+                return
+
+            d2 = payload.get("date") if isinstance(payload, dict) else None
+            if d2:
+                qd = QtCore.QDate.fromString(d2, "yyyy-MM-dd")
+                if qd.isValid():
+                    self.calendar.setSelectedDate(qd)
+
+            self._refresh_day_list()
+            self._refresh_all_list()
+            self._refresh_calendar_view()
+
+        self._run_async("스케쥴 수정", job, done)
 
     def _on_delete_clicked(self) -> None:
         item_id = self._get_selected_all_item_id()
         if not item_id:
-            QtWidgets.QMessageBox.information(self, "안내", "오른쪽 제목 리스트에서 삭제할 항목을 선택해 주세요.")
+            QtWidgets.QMessageBox.information(self, "안내", "삭제할 항목을 오른쪽 제목 리스트에서 선택해 주세요.")
             return
 
         it = self.store.items.get(item_id)
         if not it:
             return
 
-        msg = f"다음 스케쥴을 삭제할까요?\n\n{it.date} | {it.title}"
-        ret = QtWidgets.QMessageBox.question(
-            self,
-            "삭제 확인",
-            msg,
-            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-            QtWidgets.QMessageBox.No,
-        )
-        if ret != QtWidgets.QMessageBox.Yes:
+        yn = QtWidgets.QMessageBox.question(self, "삭제 확인", "선택한 스케쥴을 삭제하시겠습니까?")
+        if yn != QtWidgets.QMessageBox.Yes:
             return
 
-        self.store.delete(item_id)
+        # ✅ UI 스레드에서 service 참조를 '캡처' (스레드에서 build_service 호출 금지)
+        service = self._gcal.build_service()
+        event_id = (it.google_event_id or "").strip()
 
-        self._refresh_day_list()
-        self._refresh_all_list()
-        self._refresh_calendar_view()
-        self._select_first_item_if_any()
+        def job(progress):
+            gcal_err = None
+
+            # 1) 구글 삭제 (가능하면 시도, 실패해도 로컬 삭제는 진행)
+            progress({"stage": "gcal", "msg": "[gcal] 구글 캘린더 삭제 시도..."})
+            if service is None:
+                # 연동이 안 된 상태면 '스킵'으로 처리
+                progress({"stage": "gcal", "msg": "[gcal] 서비스 없음 → 구글 삭제 스킵"})
+            elif not event_id:
+                progress({"stage": "gcal", "msg": "[gcal] google_event_id 없음 → 구글 삭제 스킵"})
+            else:
+                try:
+                    self._gcal.delete_event(service, event_id)
+                except Exception as e:
+                    gcal_err = str(e)
+
+            # 2) 로컬 삭제
+            progress({"stage": "local", "msg": "[local] 로컬 삭제 중..."})
+            self.store.delete(item_id)
+
+            progress({"stage": "done", "msg": "[done] 완료"})
+            return {"gcal_err": gcal_err}
+
+        def done(ok, payload, err):
+            if not ok:
+                QtWidgets.QMessageBox.warning(self, "삭제 실패", f"{err}")
+                return
+
+            gcal_err = payload.get("gcal_err") if isinstance(payload, dict) else None
+            if gcal_err:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "구글 삭제 실패",
+                    "로컬은 삭제했지만 구글 캘린더 삭제는 실패했습니다.\n\n"
+                    f"{gcal_err}",
+                )
+
+            self._refresh_day_list()
+            self._refresh_all_list()
+            self._refresh_calendar_view()
+            self._render_detail(None)
+
+        self._run_async("스케쥴 삭제", job, done)
 
     def _calibrate_calendar_delta(self) -> None:
         """
@@ -730,4 +1008,228 @@ class ScheduleWidget(QtWidgets.QWidget):
                 obj = self.store.items.get(item_id)
                 self._render_detail(obj)
                 return
+
+
+
+    def _run_async(self, title: str, job, on_done):
+        # run_job_with_progress_async가 schedule.py 안에 있거나 import되어 있어야 함
+        run_job_with_progress_async(
+            owner=self,
+            title=title,
+            job=job,
+            tail_file=None,
+            on_done=on_done,
+        )
+
+
+
+####################비동기###################
+def run_job_with_progress_async(
+    owner: QtWidgets.QWidget,
+    title: str,
+    job,
+    *,
+    tail_file=None,
+    on_done=None,
+) -> None:
+
+    # 0) 기존 진행창 재사용 여부 확인
+    reuse_ctx = getattr(owner, "_progress_ctx", None)
+    on_progress_ui = finalize_ui = dlg = None
+    reused = False
+
+    if reuse_ctx is not None:
+        try:
+            old_on_progress, old_finalize, old_dlg = reuse_ctx
+            if old_dlg is not None and old_dlg.isVisible():
+                on_progress_ui, finalize_ui, dlg = old_on_progress, old_finalize, old_dlg
+                reused = True
+        except Exception:
+            pass
+
+    # 1) 재사용 불가하면 새로 만든다
+    if dlg is None:
+        on_progress_ui, finalize_ui, dlg = _mk_progress(owner, title, tail_file=tail_file)  # type: ignore
+        setattr(owner, "_progress_ctx", (on_progress_ui, finalize_ui, dlg))
+        reused = False  # 새 창이니까 원래 finalize 써도 됨
+
+    # 2) 시작 로그
+    try:
+        on_progress_ui({"stage": "ui", "msg": "[ui] 작업 시작 준비"})
+    except Exception:
+        pass
+
+    class _Worker(QtCore.QObject):
+        progress = QtCore.pyqtSignal(dict)
+        finished = QtCore.pyqtSignal(object, object)
+
+        @QtCore.pyqtSlot()
+        def run(self):
+            payload = None
+            err = None
+            try:
+                def on_progress(info: dict):
+                    if not isinstance(info, dict):
+                        info = {"msg": str(info)}
+                    self.progress.emit(info)
+                payload = job(on_progress)
+            except Exception as ex:
+                err = ex
+            finally:
+                self.finished.emit(payload, err)
+
+    obj = _Worker()
+    th = QtCore.QThread(dlg)
+    obj.moveToThread(th)
+
+    def _on_progress(info: dict):
+        try:
+            on_progress_ui(info)
+        except Exception:
+            pass
+
+    def _on_finished(payload, err):
+        ok = (err is None)
+
+        # 새로 만든 창일 때만 원래 finalize 호출
+        if not reused:
+            try:
+                finalize_ui(ok, payload, err)
+            except Exception:
+                pass
+        else:
+            # 재사용 창일 때는 닫기버튼/추가 UI 생성 막기 위해 아무것도 안 함
+            # 필요하면 여기서 로그만 하나 찍자
+            try:
+                on_progress_ui({"stage": "done", "msg": "[ui] 작업 1건 완료 (재사용 중)"})
+            except Exception:
+                pass
+
+        # 호출자가 준 on_done은 항상 불러줌
+        if callable(on_done):
+            try:
+                on_done(ok, payload, err)
+            except Exception:
+                pass
+
+        # 스레드 정리
+        try:
+            th.quit()
+            th.wait(100)
+        except Exception:
+            pass
+
+        # 소유자에 보관했던 스레드 참조 제거
+        try:
+            jobss = getattr(owner, "_progress_jobs", [])
+            if th in jobss:
+                jobss.remove(th)
+            setattr(owner, "_progress_jobs", jobss)
+        except Exception:
+            pass
+
+    obj.progress.connect(_on_progress)
+    obj.finished.connect(_on_finished)
+    th.started.connect(obj.run)
+
+    # GC 방지
+    try:
+        jobs = getattr(owner, "_progress_jobs", None)
+        if not isinstance(jobs, list):
+            jobs = []
+        jobs.append(th)
+        setattr(owner, "_progress_jobs", jobs)
+        setattr(th, "_worker_ref", obj)
+    except Exception:
+        pass
+
+    # 시작 로그
+    try:
+        on_progress_ui({"stage": "ui", "msg": "[ui] 백그라운드 스레드 시작"})
+    except Exception:
+        pass
+
+    # 스레드 시작
+    try:
+        th.start()
+    except Exception as start_exc:
+        try:
+            on_progress_ui({"stage": "error", "msg": f"[error] thread start failed: {start_exc}"})
+        except Exception:
+            pass
+        # 첫 창일 때만 finalize
+        if not reused:
+            try:
+                finalize_ui(False, None, start_exc)
+            except Exception:
+                pass
+        if callable(on_done):
+            try:
+                on_done(False, None, start_exc)
+            except Exception:
+                pass
+        return
+
+def _mk_progress(owner: QtWidgets.QWidget, title: str, tail_file=None):
+    """
+    run_job_with_progress_async()가 기대하는 형태로
+    (on_progress_ui, finalize_ui, dlg)를 만들어 반환한다.
+    """
+    dlg = QtWidgets.QDialog(owner)
+    dlg.setWindowTitle(title)
+    dlg.setModal(False)
+    dlg.resize(640, 420)
+
+    v = QtWidgets.QVBoxLayout(dlg)
+    v.setContentsMargins(10, 10, 10, 10)
+    v.setSpacing(8)
+
+    lbl = QtWidgets.QLabel(title)
+    f = lbl.font()
+    f.setBold(True)
+    lbl.setFont(f)
+    v.addWidget(lbl)
+
+    log = QtWidgets.QPlainTextEdit()
+    log.setReadOnly(True)
+    log.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
+    v.addWidget(log, 1)
+
+    row = QtWidgets.QHBoxLayout()
+    v.addLayout(row)
+
+    btn_close = QtWidgets.QPushButton("닫기")
+    btn_close.setEnabled(False)
+    row.addStretch(1)
+    row.addWidget(btn_close)
+
+    def _append(line: str):
+        try:
+            log.appendPlainText(line)
+        except Exception:
+            pass
+
+    def on_progress_ui(info: dict):
+        # info: {"stage": "...", "msg": "..."} 형태를 기대
+        if not isinstance(info, dict):
+            _append(str(info))
+            return
+        msg = info.get("msg")
+        if msg:
+            _append(str(msg))
+        else:
+            _append(str(info))
+
+    def finalize_ui(ok: bool, payload, err):
+        if ok:
+            _append("[ui] 작업 완료")
+        else:
+            _append(f"[ui] 작업 실패: {err}")
+        btn_close.setEnabled(True)
+
+    btn_close.clicked.connect(dlg.close)
+
+    dlg.show()
+    return on_progress_ui, finalize_ui, dlg
+
 

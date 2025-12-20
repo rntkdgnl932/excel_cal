@@ -1,0 +1,9 @@
+Traceback (most recent call last):
+  File "C:\my_games\excel_cal\schedule.py", line 821, in _on_add_clicked
+    self._run_async("스케쥴 추가", job, done)
+  File "C:\my_games\excel_cal\schedule.py", line 1007, in _run_async
+    run_job_with_progress_async(
+  File "C:\my_games\excel_cal\schedule.py", line 1043, in run_job_with_progress_async
+    on_progress_ui, finalize_ui, dlg = _mk_progress(owner, title, tail_file=tail_file)  # type: ignore
+NameError: name '_mk_progress' is not defined
+
