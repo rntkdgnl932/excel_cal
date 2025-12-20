@@ -2,95 +2,25 @@
   "version": 1,
   "items": [
     {
-      "id": "4c18846320df48cab4cbc5d19e03f6ae",
-      "date": "2025-12-18",
-      "title": "네이버 업로드",
-      "content": "150개 w2",
-      "completed": false,
-      "google_event_id": "",
-      "created_at": "2025-12-18T19:08:56",
-      "updated_at": "2025-12-18T19:08:56"
-    },
-    {
-      "id": "4b735930d1d643a2b772642eb3673abf",
-      "date": "2025-12-11",
-      "title": "두번째 입니다. 몇글짜 나올까영",
-      "content": "",
-      "completed": false,
-      "google_event_id": "",
-      "created_at": "2025-12-18T19:13:27",
-      "updated_at": "2025-12-18T19:13:27"
-    },
-    {
-      "id": "1fc9ab023f15416ab5ad043f1f59859b",
-      "date": "2025-12-18",
-      "title": "동국대학교 200개",
-      "content": "m1, 영문필기체, 각기 다름",
-      "completed": false,
-      "google_event_id": "",
-      "created_at": "2025-12-18T19:18:51",
-      "updated_at": "2025-12-18T19:18:51"
-    },
-    {
-      "id": "50df7a19620148ee82cc0d5ea19969bf",
-      "date": "2025-12-18",
-      "title": "몇개까지 되는지 글자는 몇자가 되는지 궁금하군",
-      "content": "오케이",
-      "completed": false,
-      "google_event_id": "",
-      "created_at": "2025-12-18T19:19:13",
-      "updated_at": "2025-12-18T19:19:13"
-    },
-    {
-      "id": "3b4b9410d23a4fc29e407cc5b8cdce88",
-      "date": "2025-12-22",
-      "title": "출고--M1-100,S-110,S-135,S-120",
-      "content": "M1-100,Having together\nS-110,다른각인\nS-135,다른각인\nS-120,다른각인",
-      "completed": false,
-      "google_event_id": "",
-      "created_at": "2025-12-19T04:30:13",
-      "updated_at": "2025-12-19T04:30:13"
-    },
-    {
-      "id": "5f354bce1cfd418f83b43b8e48580f65",
-      "date": "2025-12-22",
-      "title": "박스몰 주문",
-      "content": "30개짜리 박스",
-      "completed": true,
-      "google_event_id": "",
-      "created_at": "2025-12-19T04:31:23",
-      "updated_at": "2025-12-19T04:31:44"
-    },
-    {
-      "id": "ed19e7b957464c229145b6bc43f8d429",
-      "date": "2025-12-21",
-      "title": "추가 테스트",
-      "content": "테스트입니다",
-      "completed": false,
-      "google_event_id": "",
-      "created_at": "2025-12-21T00:09:44",
-      "updated_at": "2025-12-21T00:09:44"
-    },
-    {
-      "id": "05f2c806fd4a44dc93cca17e33ba2c56",
-      "date": "2025-12-21",
-      "title": "추가 테스트",
-      "content": "테스트입니다",
-      "completed": false,
-      "google_event_id": "",
-      "created_at": "2025-12-21T00:09:44",
-      "updated_at": "2025-12-21T00:09:44"
-    },
-    {
       "id": "867cadc3affe490ead2075a5ddf30cec",
       "date": "2025-12-24",
-      "title": "잘되나 수정",
+      "title": "잘되나 수jshdhdj",
       "content": "보자 수정",
       "completed": false,
       "google_event_id": "olii5aj0600bs3nja3l7t33lu8",
       "created_at": "2025-12-21T01:06:21",
-      "updated_at": "2025-12-21T01:08:00"
+      "updated_at": "2025-12-21T01:34:10"
+    },
+    {
+      "id": "0a5a001d351843a9a7baaccb7933661d",
+      "date": "2025-12-22",
+      "title": "출고 Having together M1-20",
+      "content": "무조건출고할거에용",
+      "completed": false,
+      "google_event_id": "6krjccj16gr64b9l75h38b9k70s3eb9p6gp32bb668o32d36c4r68pj568",
+      "created_at": "2025-12-21T01:33:41",
+      "updated_at": "2025-12-21T01:34:31"
     }
   ],
-  "saved_at": "2025-12-21T01:08:00"
+  "saved_at": "2025-12-21T01:34:31"
 }

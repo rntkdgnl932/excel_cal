@@ -160,6 +160,24 @@ class GoogleCalendarSync:
             return
         service.events().delete(calendarId=self.calendar_id, eventId=event_id).execute()
 
+    def list_events(self, service, time_min_iso: str, time_max_iso: str) -> List[dict]:
+        out: List[dict] = []
+        page_token = None
+        while True:
+            resp = service.events().list(
+                calendarId=self.calendar_id,
+                timeMin=time_min_iso,
+                timeMax=time_max_iso,
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=2500,
+                pageToken=page_token,
+            ).execute()
+            out.extend(resp.get("items", []) or [])
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+        return out
 
 
 def _now_iso() -> str:
@@ -576,9 +594,11 @@ class ScheduleWidget(QtWidgets.QWidget):
         self.btn_add = QtWidgets.QPushButton("스케쥴 추가")
         self.btn_edit = QtWidgets.QPushButton("수정")
         self.btn_delete = QtWidgets.QPushButton("삭제")
+        self.btn_sync = QtWidgets.QPushButton("구글 동기화")
         btns.addWidget(self.btn_add)
         btns.addWidget(self.btn_edit)
         btns.addWidget(self.btn_delete)
+        btns.addWidget(self.btn_sync)
         btns.addStretch(1)
 
         # =========================================
@@ -638,6 +658,7 @@ class ScheduleWidget(QtWidgets.QWidget):
         self.btn_add.clicked.connect(self._on_add_clicked)
         self.btn_edit.clicked.connect(self._on_edit_clicked)
         self.btn_delete.clicked.connect(self._on_delete_clicked)
+        self.btn_sync.clicked.connect(self._on_sync_clicked)
 
         self.all_list.currentItemChanged.connect(self._on_all_selection_changed)
 
@@ -826,6 +847,8 @@ class ScheduleWidget(QtWidgets.QWidget):
             self._refresh_day_list()
             self._refresh_all_list()
             self._refresh_calendar_view()
+            self._sync_mirror_from_google_async(reason="after-add")
+
 
         self._run_async("스케쥴 추가", job, done)
 
@@ -884,6 +907,9 @@ class ScheduleWidget(QtWidgets.QWidget):
             self._refresh_day_list()
             self._refresh_all_list()
             self._refresh_calendar_view()
+            self._sync_mirror_from_google_async(reason="after-edit")
+
+
 
         self._run_async("스케쥴 수정", job, done)
 
@@ -946,6 +972,9 @@ class ScheduleWidget(QtWidgets.QWidget):
             self._refresh_all_list()
             self._refresh_calendar_view()
             self._render_detail(None)
+            self._sync_mirror_from_google_async(reason="after-delete")
+
+
 
         self._run_async("스케쥴 삭제", job, done)
 
@@ -1021,6 +1050,128 @@ class ScheduleWidget(QtWidgets.QWidget):
             on_done=on_done,
         )
 
+    def _on_sync_clicked(self) -> None:
+        self._sync_mirror_from_google_async(reason="manual")
+
+    def showEvent(self, e: QtGui.QShowEvent) -> None:
+        super().showEvent(e)
+        if not getattr(self, "_did_initial_gsync", False):
+            self._did_initial_gsync = True
+            self._sync_mirror_from_google_async(reason="tab-open")
+
+    def _sync_mirror_from_google_async(self, *, reason: str) -> None:
+        """
+        구글(휴대폰) = 단일 진실.
+        동기화 시 로컬(schedule_data.json)은 구글 상태와 '완전히 동일'해진다.
+        - 구글에 없는 로컬 일정은 삭제된다(강제).
+        - all-day(date) 이벤트만 대상(시간 이벤트는 정책상 스킵).
+        """
+
+        def job(progress):
+            progress({"stage": "gcal", "msg": f"[gcal] 동기화(미러) 시작 ({reason})"})
+
+            service = self._gcal.build_service()
+
+            # 범위는 넓게: 날짜를 폰에서 옮겨도 누락되어 '삭제'되는 사고 방지
+            today = datetime.now().date()
+            d1 = today - timedelta(days=365)
+            d2 = today + timedelta(days=365)
+            time_min = f"{d1.isoformat()}T00:00:00Z"
+            time_max = f"{d2.isoformat()}T00:00:00Z"
+
+            events = self._gcal.list_events(service, time_min, time_max)
+            progress({"stage": "gcal", "msg": f"[gcal] 조회 {len(events)}건"})
+
+            # 1) 구글 이벤트 정리 (id -> parsed)
+            gmap: Dict[str, dict] = {}
+            for ev in events:
+                eid = str(ev.get("id", "") or "").strip()
+                if not eid:
+                    continue
+
+                start = ev.get("start") or {}
+                date_str = start.get("date")  # all-day만
+                if not date_str:
+                    continue  # timed event는 스킵
+
+                summary = str(ev.get("summary", "") or "")
+                desc = str(ev.get("description", "") or "")
+
+                completed = False
+                title = summary
+                if summary.startswith("[완료]"):
+                    completed = True
+                    title = summary.replace("[완료]", "", 1).strip()
+
+                gmap[eid] = {
+                    "eid": eid,
+                    "date": date_str,
+                    "title": title,
+                    "content": desc,
+                    "completed": completed,
+                }
+
+            # 2) 로컬에서 google_event_id -> item 매핑
+            local_by_eid: Dict[str, ScheduleItem] = {}
+            local_ids_with_google: set[str] = set()
+            local_ids_without_google: set[str] = set()
+
+            for it in list(self.store.items.values()):
+                eid = (it.google_event_id or "").strip()
+                if eid:
+                    local_by_eid[eid] = it
+                    local_ids_with_google.add(it.id)
+                else:
+                    local_ids_without_google.add(it.id)
+
+            updated_cnt = 0
+            created_cnt = 0
+            deleted_cnt = 0
+
+            # 3) (A) 구글에 존재하는 이벤트들을 로컬에 upsert
+            for eid, info in gmap.items():
+                it = local_by_eid.get(eid)
+                if it:
+                    # update
+                    it.date = info["date"]
+                    it.title = info["title"]
+                    it.content = info["content"]
+                    it.completed = info["completed"]
+                    it.updated_at = _now_iso()
+                    updated_cnt += 1
+                else:
+                    # create local item
+                    new_it = self.store.add(info["date"], info["title"], info["content"], info["completed"])
+                    new_it.google_event_id = eid
+                    self.store.save()
+                    created_cnt += 1
+
+            # 3) (B) 구글에 없는 로컬(구글 연동된 것)은 삭제(강제 미러)
+            g_eids = set(gmap.keys())
+            for eid, it in list(local_by_eid.items()):
+                if eid not in g_eids:
+                    self.store.delete(it.id)
+                    deleted_cnt += 1
+
+            # 3) (C) 구글_event_id 없는 “로컬-only” 항목 처리 정책
+            # “무조건 휴대폰과 동일”이면 로컬-only는 남기면 안 됩니다.
+            # 따라서: 로컬-only는 삭제합니다. (원하면 '자동 업로드 후 동기화'로 바꿀 수도 있음)
+            for item_id in list(local_ids_without_google):
+                self.store.delete(item_id)
+                deleted_cnt += 1
+
+            progress({"stage": "local", "msg": f"[local] 업데이트 {updated_cnt}, 신규 {created_cnt}, 삭제 {deleted_cnt}"})
+            return {"updated": updated_cnt, "created": created_cnt, "deleted": deleted_cnt}
+
+        def done(ok, payload, err):
+            if not ok:
+                QtWidgets.QMessageBox.warning(self, "동기화 실패", f"{err}")
+                return
+            self._refresh_day_list()
+            self._refresh_all_list()
+            self._refresh_calendar_view()
+
+        self._run_async("구글 동기화", job, done)
 
 
 ####################비동기###################
