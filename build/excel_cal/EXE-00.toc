@@ -77,7 +77,7 @@
  [],
  False,
  False,
- 1766336787,
+ 1766342548,
  [('run.exe',
    'C:\\my_games\\excel_cal\\.venv\\lib\\site-packages\\PyInstaller\\bootloader\\Windows-64bit-intel\\run.exe',
    'EXECUTABLE')],
