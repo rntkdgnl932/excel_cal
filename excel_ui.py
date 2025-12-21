@@ -189,7 +189,7 @@ class MainTabbedWindow(QtWidgets.QMainWindow):
         tabs = QtWidgets.QTabWidget(self)
         self.setCentralWidget(tabs)
 
-        force_tab_size_only(tabs, tab_w=200, tab_h=52)  # ✅ 탭 크기만 강제
+        force_tab_size_only(tabs, tab_w=250, tab_h=45)  # ✅ 탭 크기만 강제
 
         # ✅ 탭 글자 잘림 방지 (탭 바/폰트/패딩)
         tabbar = tabs.tabBar()
@@ -335,7 +335,8 @@ def _apply_app_style(app) -> None:
             file_qss = qss_path.read_text(encoding="utf-8")
         except Exception:
             file_qss = qss_path.read_text(encoding="utf-8", errors="replace")
-        app.setStyleSheet(file_qss + "\n\n" + base_qss)
+        app.setStyleSheet(file_qss)
+
     else:
         # 2) qss 파일이 없으면 base_qss만 적용
         app.setStyleSheet(base_qss)
@@ -419,7 +420,7 @@ class FixedSizeTabBar(QtWidgets.QTabBar):
     탭 크기만 강제로 고정하는 TabBar.
     QSS/레이아웃이 뭐라고 하든 tabSizeHint를 고정해서 '진짜로' 탭 크기가 커진다.
     """
-    def __init__(self, tab_w: int = 280, tab_h: int = 46, parent=None):
+    def __init__(self, tab_w: int = 350, tab_h: int = 40, parent=None):
         super().__init__(parent)
         self._tab_w = int(tab_w)
         self._tab_h = int(tab_h)

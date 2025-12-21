@@ -1,160 +1,293 @@
 /* =========================================================
-   공통 (RESET + 기본 가독성)
+   공통 (Base / Background / Typography)
+   - 검정 배경 절대 금지
+   - 레이아웃(겹침)은 QSS로 padding 크게 주지 말고, spacing은 코드/레이아웃에서
    ========================================================= */
 
 * {
-    font-family: "맑은 고딕";
-    font-size: 13px;
-    color: #3a2f2f;
+    font-family: "Malgun Gothic";
+    font-size: 10pt;
+    color: #1f2328;
 }
 
-QMainWindow {
-    background: #fffafa;
+QMainWindow, QWidget {
+    background: #f4f6f7; /* 연회색 바탕 */
 }
 
-/* 입력 위젯 */
-QLineEdit, QDateEdit {
-    background: #ffffff;
-    border: 1px solid #e5bfc6;
-    border-radius: 10px;
-
-    /* ✅ 내부 패딩(글자/테두리 간격) */
-    padding: 8px 12px;
-    min-height: 34px;
-
-    /* ✅ 레이아웃 셀 사이가 붙어 보이는 현상 방지 */
-    margin: 2px;
+QDialog {
+    background: #f4f6f7;
 }
 
-/* ✅ QDateEdit은 우측 드롭다운 영역 때문에 경계가 겹쳐 보일 수 있어 우측 패딩 확보 */
-QDateEdit {
-    padding-right: 34px;
+/* ScrollArea/Viewport가 비면 검정이 비쳐보이는 케이스 방지 */
+QScrollArea, QAbstractScrollArea {
+    background: transparent;
+    border: none;
+}
+QAbstractScrollArea::viewport {
+    background: #f4f6f7;
 }
 
-QDateEdit::drop-down {
-    subcontrol-origin: padding;
-    subcontrol-position: top right;
-    width: 28px;
-    border-left: 1px solid #e5bfc6;
-}
-
-
-
-QLineEdit:focus, QDateEdit:focus {
-    border: 1px solid #d98c9b;
-}
-
-/* 버튼 기본 */
-QPushButton {
-    background: #ffffff;
-    border: 1px solid #d9a3ad;
-    border-radius: 16px;
-    padding: 6px 14px;
-}
-
-QPushButton:hover {
-    background: #fdecef;
-}
-
-/* 강조 버튼 */
-QPushButton[accent="true"] {
-    background: #e7a1b0;
-    color: white;
+/* 프레임/구분선 */
+QFrame {
+    background: transparent;
     border: none;
 }
 
-QPushButton[accent="true"]:hover {
-    background: #dc8c9c;
+/* =========================================================
+   탭 (TabWidget / TabBar)
+   - 탭 높이/위치 과도하게 건드리면 깨짐 → 최소만
+   ========================================================= */
+
+QTabWidget::pane {
+    border: 1px solid #e5e8ee;
+    border-radius: 14px;
+    background: transparent;
+}
+
+QTabBar {
+    background: transparent;
+}
+
+QTabBar::tab {
+    padding: 10px 22px;
+    margin-right: 10px;
+
+    border: 1px solid #e5e8ee;
+    border-bottom: none;
+
+    border-top-left-radius: 16px;
+    border-top-right-radius: 16px;
+
+    background: #eef1f4;
+    color: #2b2f36;
+    font-weight: 700;
+}
+
+QTabBar::tab:hover {
+    background: #f3f5f7;
+}
+
+QTabBar::tab:selected {
+    background: #f7d3dc;   /* 세련된 핑크(블러쉬) */
+    border-color: #e9aab7;
+    color: #3a1f27;
+    font-weight: 800;
 }
 
 /* =========================================================
-   GroupBox (제목 잘림 문제 해결 핵심)
+   그룹박스 (Card / Section)
+   - 핵심: QGroupBox에 padding 크게 주지 말 것(겹침/높이 계산 깨짐)
+   - 가짜 그림자: 하단 보더만 살짝 진하게
    ========================================================= */
 
 QGroupBox {
-    border: 1px solid #e5bfc6;
-    border-radius: 14px;
-    margin-top: 26px;            /* 🔥 제목 공간 확보 */
-    background: #fffdfd;
+    background: #ffffff;
+    border: 1px solid #f0c9d2;
+    border-bottom: 3px solid #e6b4bf;  /* 가짜 shadow */
+    border-radius: 16px;
+
+    /* title 공간 확보만: margin-top은 안전 */
+    margin-top: 26px;
+
+    /* ❗padding은 최소만(겹침 방지) */
+    padding: 6px;
 }
 
 QGroupBox::title {
     subcontrol-origin: margin;
     subcontrol-position: top left;
 
-    padding: 4px 12px;           /* 🔥 제목 안쪽 여백 */
-    margin-left: 12px;
+    /* 위치를 크게 조작하지 말고, 기본 흐름에서 margin-left만 */
+    margin-left: 14px;
+    margin-top: 10px;
 
-    font-weight: bold;
-    font-size: 13px;
+    padding: 4px 10px;
+    background: #f7d3dc;
+    color: #3a1f27;
+    border: 1px solid #efb7c3;
+    border-radius: 12px;
+    font-weight: 900;
+}
 
-    background: #f6c9d2;
-    color: #5a2a33;
-    border-radius: 8px;
+/* 그룹 안 소제목용 라벨이 있다면(코드에서 setProperty 가능) */
+QLabel[sectionTitle="true"] {
+    color: #3a1f27;
+    font-weight: 900;
 }
 
 /* =========================================================
-   설명/결과 텍스트
+   입력 위젯 (LineEdit / DateEdit / Combo / Spin)
+   - 입력칸끼리 "붙어 보이는" 현상 방지: margin 2px
+   - DateEdit 우측 버튼 영역 보강
    ========================================================= */
 
-QLabel[muted="true"] {
-    color: #8a6a70;
+QLineEdit, QDateEdit, QComboBox, QSpinBox, QDoubleSpinBox, QTextEdit, QPlainTextEdit {
+    background: #ffffff;
+    border: 1px solid #e8c1cb;
+    border-radius: 12px;
+
+    padding: 8px 12px;
+    min-height: 34px;
+
+    /* 셀 안에서 테두리가 붙어 보이는 걸 끊어줌 */
+    margin: 2px;
 }
 
-/* 합계 표시 (아래 잘 안 보이던 부분) */
-QLabel[sum="true"] {
-    background: #f6c9d2;
-    color: #5a2a33;
-    font-weight: bold;
-    padding: 6px 12px;
-    border-radius: 12px;
+QLineEdit:focus, QDateEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus,
+QTextEdit:focus, QPlainTextEdit:focus {
+    border: 1px solid #e19dad;
+    background: #fff7f9;
+}
+
+/* placeholder */
+QLineEdit::placeholder, QTextEdit::placeholder, QPlainTextEdit::placeholder {
+    color: #9aa1ac;
+}
+
+/* QDateEdit: 우측 drop-down 영역 때문에 경계가 겹쳐 보일 수 있음 */
+QDateEdit {
+    padding-right: 40px;
+}
+
+QDateEdit::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 30px;
+
+    background: #f6f7fb;
+    border-left: 1px solid #e8c1cb;
+
+    border-top-right-radius: 12px;
+    border-bottom-right-radius: 12px;
+}
+
+/* ComboBox drop-down */
+QComboBox::drop-down {
+    width: 30px;
+    border-left: 1px solid #e8c1cb;
+    background: #f6f7fb;
+    border-top-right-radius: 12px;
+    border-bottom-right-radius: 12px;
 }
 
 /* =========================================================
-   테이블
+   버튼 (높이/라운드/세련)
+   - 기본 버튼: 화이트 + 얇은 테두리
+   - 포인트 버튼: accent=true 프로퍼티로만 강조
    ========================================================= */
 
-QTableWidget {
-    background: white;
-    border: 1px solid #e5bfc6;
-    border-radius: 12px;
+QPushButton {
+    background: #ffffff;
+    border: 1px solid #e6e8ef;
+    border-radius: 16px;
+
+    padding: 10px 16px;
+    min-height: 40px;
+
+    color: #1f2328;
+    font-weight: 800;
+}
+
+QPushButton:hover {
+    background: #fff1f4;
+    border-color: #e8c1cb;
+}
+
+QPushButton:pressed {
+    background: #ffe6ed;
+    border-color: #e19dad;
+}
+
+/* 강조 버튼 */
+QPushButton[accent="true"] {
+    background: #e9aab7;
+    border: 1px solid #e9aab7;
+    color: #ffffff;
+}
+
+QPushButton[accent="true"]:hover {
+    background: #df95a6;
+    border-color: #df95a6;
+}
+
+QPushButton[accent="true"]:pressed {
+    background: #d58395;
+    border-color: #d58395;
+}
+
+QPushButton:disabled {
+    background: #f2f3f6;
+    border-color: #e6e8ef;
+    color: #9aa1ac;
+}
+
+/* =========================================================
+   테이블 (QTableWidget / Header)
+   ========================================================= */
+
+QTableWidget, QTableView {
+    background: #ffffff;
+    border: 1px solid #e6e8ef;
+    border-bottom: 3px solid #d8dbe3; /* 카드톤 가짜 shadow */
+    border-radius: 16px;
+    gridline-color: #eef0f6;
 }
 
 QHeaderView::section {
-    background: #fdecef;
+    background: #f3f5f8;
+    color: #2b2f36;
+    padding: 10px 12px;
     border: none;
-    padding: 6px;
-    font-weight: bold;
+    border-bottom: 1px solid #e6e8ef;
+    font-weight: 900;
+}
+
+QTableWidget::item:selected, QTableView::item:selected {
+    background: #fff1f4;
+    color: #1f2328;
 }
 
 /* =========================================================
-   탭 위젯
+   스크롤바 (미니멀, 검정 없음)
    ========================================================= */
 
-QTabWidget::pane {
-    border: none;
+QScrollBar:vertical {
+    background: transparent;
+    width: 12px;
+    margin: 10px 4px 10px 4px;
 }
-
-/* 기본 탭 */
-QTabBar::tab {
-    background: #f7f7f7;
-    border: 1px solid #ddd;
-    border-bottom: none;
-    padding: 10px 22px;
-    border-top-left-radius: 14px;
-    border-top-right-radius: 14px;
-    margin-right: 6px;
+QScrollBar::handle:vertical {
+    background: #cfd6df;
+    border-radius: 6px;
+    min-height: 40px;
 }
-
-/* 선택된 탭 */
-QTabBar::tab:selected {
-    background: #f6c9d2;
-    color: #5a2a33;
-    font-weight: bold;
+QScrollBar::handle:vertical:hover {
+    background: #bfc8d3;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0px;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
 }
 
 /* =========================================================
-   첫 번째 탭 (핑크 컨셉) – 여기까지만 적용
+   (옵션) 결과/알림 라벨 스타일 (코드에서 setProperty 가능)
    ========================================================= */
 
-/* 👉 두 번째 ~ 네 번째 탭은 다음 단계에서 분리 적용 */
+QLabel[result="true"] {
+    background: #fff7f9;
+    border: 1px solid #e8c1cb;
+    border-radius: 12px;
+    padding: 10px 12px;
+    color: #1f2328;
+    font-weight: 700;
+}
+
+QLabel[pill="true"] {
+    background: #f7d3dc;
+    color: #3a1f27;
+    border-radius: 999px;
+    padding: 8px 12px;
+    font-weight: 900;
+}

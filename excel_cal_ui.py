@@ -194,13 +194,18 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         # --------------------------
         grp_tpl = QtWidgets.QGroupBox("엑셀 템플릿 파일 (기존 양식)")
         grp_tpl.setProperty("card", True)
-        grp_tpl.setMaximumHeight(140)
+
+        # ✅ 겹침 원인 제거: 높이 강제 금지 (3줄 입력칸 + 마진/타이틀이 140px에 못 들어감)
+        grp_tpl.setMaximumHeight(16777215)  # 사실상 무제한
+        grp_tpl.setMinimumHeight(0)
 
         layout_tpl = QtWidgets.QGridLayout(grp_tpl)
-        layout_tpl.setContentsMargins(10, 10, 10, 10)
-        layout_tpl.setHorizontalSpacing(10)
-        layout_tpl.setVerticalSpacing(8)
+        layout_tpl.setContentsMargins(12, 16, 12, 12)  # 타이틀 아래 공간 확보(겹침 방지)
+        layout_tpl.setHorizontalSpacing(12)
+        layout_tpl.setVerticalSpacing(10)
         layout_tpl.setColumnStretch(1, 1)
+        layout_tpl.setColumnMinimumWidth(0, 110)  # 라벨 폭 고정 (줄바꿈/찌그러짐 방지)
+        layout_tpl.setColumnMinimumWidth(2, 88)  # '찾기' 버튼 칼럼 폭 확보
 
         self.TEMPLATE_DIR = base_dir / "ex"
 
