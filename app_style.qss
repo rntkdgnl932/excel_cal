@@ -18,9 +18,8 @@
     color: #1f2328;
 }
 
-QMainWindow,
-QWidget {
-    background: #f5f6f8;   /* 연회색 베이스 */
+QMainWindow {
+    background: #f5f6f8;   /* 전체 프레임 베이스 */
 }
 
 /* 스크롤 영역 검정 방지 */
@@ -35,14 +34,13 @@ QAbstractScrollArea::viewport {
 }
 
 QWidget#tab_pink   { background-color: #fff3f7; }
-QWidget#tab_dark   { background-color: #1f2329; }
+QWidget#tab_dark   { background-color: #f4f6f9; } /* 다크 탭 배경은 연회색(가독성) */
 QWidget#tab_blue   { background-color: #f3f7ff; }
 QWidget#tab_orange { background-color: #fbf7f3; }
 
 
-
 /* =========================================================
-   2. 탭 (크기 안정 + 핑크 포인트)
+   2. 탭 (크기 안정 + 4색 테마 적용)
    ========================================================= */
 
 QTabWidget::pane {
@@ -74,11 +72,40 @@ QTabBar::tab:hover {
     background: #f4f6f9;
 }
 
-QTabBar::tab:selected {
-    background: #f7d3dc;          /* 메인 핑크 */
+/* [수정됨] 탭 선택 시 테마별(핑크/다크/블루/오렌지) 색상 분기
+   excel_ui.py의 setProperty("theme", ...) 와 연동됨
+*/
+
+/* 1) 핑크 테마 (기본/부가세) */
+QTabWidget[theme="pink"] QTabBar::tab:selected {
+    background: #f7d3dc;
     border-color: #e6a8b6;
     color: #3a1f27;
-    font-weight: 700;
+    font-weight: 800;
+}
+
+/* 2) 다크 테마 (송장 읽기) */
+QTabWidget[theme="dark"] QTabBar::tab:selected {
+    background: #2d3748;       /* 진한 회색 */
+    border-color: #1a202c;
+    color: #ffffff;            /* 흰색 글씨 */
+    font-weight: 800;
+}
+
+/* 3) 블루 테마 (스케줄) */
+QTabWidget[theme="blue"] QTabBar::tab:selected {
+    background: #ebf8ff;       /* 연한 파랑 */
+    border-color: #4299e1;
+    color: #2b6cb0;            /* 진한 파랑 글씨 */
+    font-weight: 800;
+}
+
+/* 4) 오렌지 테마 (업데이트) */
+QTabWidget[theme="orange"] QTabBar::tab:selected {
+    background: #fffaf0;       /* 연한 주황 */
+    border-color: #ed8936;
+    color: #c05621;            /* 진한 주황 글씨 */
+    font-weight: 800;
 }
 
 
