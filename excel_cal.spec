@@ -2,10 +2,10 @@
 
 
 a = Analysis(
-    ['excel_ui.py'],
+    ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[('icon.ico', '.')],
+    datas=[('icon.ico', '.'), ('app_style.qss', '.')],
     hiddenimports=['PyQt5'],
     hookspath=[],
     hooksconfig={},

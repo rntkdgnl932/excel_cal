@@ -1,14 +1,17 @@
 # excel_ui.py
 # 탭 통합 메인 UI: 기존 엑셀 계산기 + 네이버/쿠팡 송장 읽기 + git 업데이트 탭
 
+# excel_ui.py
+# 탭 통합 메인 UI: 기존 엑셀 계산기 + 네이버/쿠팡 송장 읽기 + git 업데이트 탭
+
 import sys
 import subprocess
 from pathlib import Path
 
 from PyQt5 import QtWidgets, QtCore
 
-from excel_cal_ui import ExcelCalWindow      # 기존 부가세/3종 엑셀 UI
-from read_excel import ReadInvoiceWidget     # 송장 읽기 탭
+from excel_cal_ui import ExcelCalWindow  # 기존 부가세/3종 엑셀 UI
+from read_excel import ReadInvoiceWidget  # 송장 읽기 탭
 from schedule import ScheduleWidget
 
 
@@ -214,9 +217,9 @@ class MainTabbedWindow(QtWidgets.QMainWindow):
 
         # ✅ 탭 글자 잘림 방지 (탭 바/폰트/패딩)
         tabbar = tabs.tabBar()
-        tabbar.setElideMode(QtCore.Qt.ElideNone)      # "..." 생략 금지
-        tabbar.setUsesScrollButtons(True)            # 탭 많으면 스크롤 버튼
-        tabbar.setExpanding(False)                   # 탭이 균등 확장되며 잘리는 현상 방지
+        tabbar.setElideMode(QtCore.Qt.ElideNone)  # "..." 생략 금지
+        tabbar.setUsesScrollButtons(True)  # 탭 많으면 스크롤 버튼
+        tabbar.setExpanding(False)  # 탭이 균등 확장되며 잘리는 현상 방지
 
         # 탭/입력창이 너무 큰 기본 폰트가 잡혀있으면 강제로 정리
         # (QSS가 적용되더라도 기본 폰트가 크면 내부 위젯들이 같이 커지는 경우가 있음)
@@ -258,24 +261,26 @@ class MainTabbedWindow(QtWidgets.QMainWindow):
         self.update_widget.setObjectName("tab_orange")
 
         theme_by_index = {
-            0: "pink",    # 부가세 계산 / 3종 엑셀
-            1: "dark",    # 네이버·쿠팡 송장
-            2: "blue",    # 스케쥴
+            0: "pink",  # 부가세 계산 / 3종 엑셀
+            1: "dark",  # 네이버·쿠팡 송장
+            2: "blue",  # 스케쥴
             3: "orange",  # 업데이트
         }
 
+        # [수정됨] QTabBar 자체에 속성을 부여해서 탭 색상을 즉시 갱신
         def _apply_theme_for_index(idx: int) -> None:
             theme = theme_by_index.get(idx, "pink")
-            tabs.setProperty("theme", theme)
-            # 스타일 재적용(선택탭 색상까지 변경)
-            tabs.style().unpolish(tabs)
-            tabs.style().polish(tabs)
+
+            # 1) TabBar에 테마 속성 부여
+            tabs.tabBar().setProperty("theme", theme)
+
+            # 2) 스타일 강제 갱신 (unpolish -> polish)
+            tabs.tabBar().style().unpolish(tabs.tabBar())
+            tabs.tabBar().style().polish(tabs.tabBar())
             tabs.update()
 
         tabs.currentChanged.connect(_apply_theme_for_index)
         _apply_theme_for_index(tabs.currentIndex())
-
-
 
         # 여기서 한 번만 상태 새로고침 호출 → "도달할 수 없습니다" 경고 안 뜸
         self.update_widget.on_refresh_clicked()
@@ -394,7 +399,6 @@ def _apply_app_style(app) -> None:
         app.setStyleSheet(base_qss)
 
 
-
 def install_global_exception_dump(log_dir: str) -> None:
     """
     프로그램이 시작하자마자 꺼지는 경우(콘솔이 닫혀서 안 보이는 예외)를 파일로 남긴다.
@@ -443,6 +447,7 @@ def install_global_exception_dump(log_dir: str) -> None:
     except Exception:
         pass
 
+
 def force_tab_size_only(tabs: QtWidgets.QTabWidget, *, tab_w: int = 700, tab_h: int = 50) -> None:
     """
     '탭 크기만' 강제로 적용.
@@ -466,12 +471,12 @@ def force_tab_size_only(tabs: QtWidgets.QTabWidget, *, tab_w: int = 700, tab_h: 
     new_bar.setMinimumHeight(tab_h)
 
 
-
 class FixedSizeTabBar(QtWidgets.QTabBar):
     """
     탭 크기만 강제로 고정하는 TabBar.
     QSS/레이아웃이 뭐라고 하든 tabSizeHint를 고정해서 '진짜로' 탭 크기가 커진다.
     """
+
     def __init__(self, tab_w: int = 350, tab_h: int = 40, parent=None):
         super().__init__(parent)
         self._tab_w = int(tab_w)
@@ -493,7 +498,6 @@ class FixedSizeTabBar(QtWidgets.QTabBar):
         w = max(base.width(), self._tab_w)
         h = max(base.height(), self._tab_h)
         return QtCore.QSize(w, h)
-
 
 
 def main():
@@ -525,12 +529,8 @@ def main():
         raise
 
 
-
-
-
 if __name__ == "__main__":
     main()
-
 
 
 # python -m PyInstaller `
