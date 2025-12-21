@@ -820,21 +820,29 @@ class ScheduleWidget(QtWidgets.QWidget):
         self._refresh_all_list()
         self._select_first_item_if_any()
         self._refresh_calendar_view()
-        self._gcal_service = None  # ✅ 추가: 서비스 캐시
+
+        self._gcal_service = None  # 서비스 캐시 초기화
 
         try:
-            # token.json 없으면 여기서만 브라우저로 로그인
-            if not (self._gcal_secrets_dir / "token.json").exists():
-                QtWidgets.QMessageBox.information(self, "구글 연동", "처음 1회 구글 캘린더 연동이 필요합니다.")
-                # self._gcal.authorize_interactive()
-                self._gcal.authorize_interactive(parent=self)
+            # [수정됨] client_secret.json 파일이 있을 때만 연동 시도!
+            if self._gcal.client_secret_path.exists():
 
-            # ✅ 추가: UI 스레드에서 서비스 1회 생성(여기서 크래시/인증 이슈를 미리 잡음)
-            self._gcal_service = self._gcal.build_service()
+                # token.json 없으면 로그인 유도
+                if not (self._gcal_secrets_dir / "token.json").exists():
+                    QtWidgets.QMessageBox.information(self, "구글 연동", "처음 1회 구글 캘린더 연동이 필요합니다.")
+                    self._gcal.authorize_interactive(parent=self)
+
+                # 서비스 생성 시도
+                self._gcal_service = self._gcal.build_service()
+
+            else:
+                # 파일이 없으면 그냥 조용히 로컬 모드로 시작
+                self._gcal_service = None
 
         except Exception as e:
             self._gcal_service = None
-            QtWidgets.QMessageBox.warning(self, "구글 연동 실패", str(e))
+            # 에러 나도 굳이 경고창 띄우지 않고 로컬 모드로 (원하시면 경고창 띄워도 됨)
+            print(f"[Warning] 구글 연동 초기화 실패: {e}")
 
     # ---------- Calendar data ----------
     def _get_items_for_date_for_calendar(self, date_str: str) -> List[ScheduleItem]:
