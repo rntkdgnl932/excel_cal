@@ -873,8 +873,8 @@ class ScheduleWidget(QtWidgets.QWidget):
             # token.json 없으면 여기서만 브라우저로 로그인
             if not (self._gcal_secrets_dir / "token.json").exists():
                 QtWidgets.QMessageBox.information(self, "구글 연동", "처음 1회 구글 캘린더 연동이 필요합니다.")
-                self._gcal.authorize_interactive()
-                # self._gcal.authorize_interactive(parent=self)
+                # self._gcal.authorize_interactive()
+                self._gcal.authorize_interactive(parent=self)
 
             # ✅ 추가: UI 스레드에서 서비스 1회 생성(여기서 크래시/인증 이슈를 미리 잡음)
             self._gcal_service = self._gcal.build_service()
