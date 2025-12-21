@@ -647,6 +647,8 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
 
             gagin = "각인"
 
+            work_status = "작업유무"  # 컬럼 이름 정의
+
             ##############엑셀
             file_path, ext = QFileDialog.getOpenFileName(self, '파일 열기', os.getcwd(), 'excel file (*.xls *.xlsx)')
             if file_path:
@@ -991,6 +993,8 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
                 new_data.astype(str)
                 send_data.astype(str)
 
+                new_data[work_status] = ""
+
                 # 데이터프레임을 엑셀 파일로 저장
                 excel_file_name = dir_path + last + "네이버_송장발부.xlsx"
                 # df.to_excel(excel_file_name, index=False)
@@ -1085,6 +1089,8 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
             ############ 추가
 
             gagin = "각인"
+
+            work_status = "작업유무"
 
             ##############쿠팡 추가
 
@@ -1377,6 +1383,8 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
                 ###################################################
                 ##################################################
                 new_data.astype(str)
+
+                new_data[work_status] = ""
 
                 # 데이터프레임을 엑셀 파일로 저장
                 excel_file_name = dir_path + last + "쿠팡_송장발부.xlsx"

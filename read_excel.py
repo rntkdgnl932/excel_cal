@@ -381,6 +381,23 @@ class ReadInvoiceWidget(QWidget):
         self.table.setWordWrap(True)
         main_layout.addWidget(self.table, 1)
 
+        self.btn_complete = QPushButton("▼ 선택된 주문 '작업 완료' 체크 (노란색 표시)")
+        self.btn_complete.setFixedHeight(30)
+        # 배경색(#FFB6C1 = 연한 핑크), 글자색(black), 굵게
+        self.btn_complete.setStyleSheet("""
+                    QPushButton {
+                        font-weight: bold;
+                        background-color: #FFB6C1; 
+                        border: 1px solid #ff9eb0;
+                        border-radius: 4px;
+                    }
+                    QPushButton:hover {
+                        background-color: #ff99aa;
+                    }
+                """)
+        self.btn_complete.clicked.connect(self.on_click_complete)
+        main_layout.addWidget(self.btn_complete)
+
         # -------------------------
         # 문자 전송 패널 (ship_sms)
         # -------------------------
@@ -406,6 +423,8 @@ class ReadInvoiceWidget(QWidget):
     def _build_sms_panel(self, parent_layout: QVBoxLayout):
         grp = QGroupBox("문자 전송")
         grp.setObjectName("ship_sms")
+
+        grp.setMaximumHeight(220)
 
         layout = QHBoxLayout(grp)
         layout.setContentsMargins(12, 12, 12, 12)
@@ -553,6 +572,73 @@ class ReadInvoiceWidget(QWidget):
         self._current_row_idx = row_idx
         self._update_sms_panel_for_row(row_idx)
 
+    def on_click_complete(self):
+        """
+        선택된 행을 '완료' 처리하고 엑셀 파일에 즉시 저장.
+        """
+        if self.current_df is None or not self.current_file:
+            QtWidgets.QMessageBox.warning(self, "경고", "열린 파일이 없습니다.")
+            return
+
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            QtWidgets.QMessageBox.information(self, "알림", "완료 처리할 행을 선택해주세요.")
+            return
+
+        # 1. '작업유무' 컬럼이 없으면 DataFrame에 생성
+        if "작업유무" not in self.current_df.columns:
+            self.current_df["작업유무"] = ""
+
+        # 색상 정의
+        done_color = QtGui.QColor(255, 255, 100)  # 노란색
+        white_color = QtGui.QColor(255, 255, 255)  # 흰색
+
+        # 토글 상태 확인 (첫 번째 선택 행 기준)
+        first_row_idx = selected_rows[0].row()
+        first_item = self.table.item(first_row_idx, 0)
+        is_already_done = (first_item.background().color() == done_color)
+
+        target_color = white_color if is_already_done else done_color
+        target_text = "" if is_already_done else "완료"
+        status_msg = "취소" if is_already_done else "완료"
+
+        try:
+            # 2. 화면(GUI)과 데이터(DataFrame) 업데이트
+            for idx in selected_rows:
+                r = idx.row()
+
+                # (1) 데이터프레임 값 변경
+                self.current_df.at[r, "작업유무"] = target_text
+
+                # (2) 테이블 화면 색상 변경
+                for c in range(self.table.columnCount()):
+                    it = self.table.item(r, c)
+                    if it:
+                        it.setBackground(target_color)
+
+                # 사진 버튼 색상도 변경 (옵션)
+                photo_col_idx = self._col_index.get("사진")
+                if photo_col_idx:
+                    widget = self.table.cellWidget(r, photo_col_idx)
+                    if widget:
+                        bg_style = "background-color: #ffffaa;" if not is_already_done else ""
+                        widget.setStyleSheet(bg_style)
+
+            # 3. 엑셀 파일로 저장 (핵심)
+            # 주의: 엑셀 파일이 다른 프로그램(엑셀 등)에서 열려 있으면 에러가 납니다.
+            self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
+
+            self.log.appendPlainText(f"[저장] {len(selected_rows)}건 {status_msg} 처리 후 파일 저장 완료.")
+
+        except PermissionError:
+            QtWidgets.QMessageBox.critical(self, "저장 실패",
+                                           "엑셀 파일이 열려 있어서 저장할 수 없습니다.\n엑셀을 끄고 다시 시도해주세요.")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류 발생: {e}")
+
+        # 선택 풀기
+        self.table.clearSelection()
+
     # ------------------------------------------------------------------
     # 문자 전송 버튼 (현재는 로그만 남김)
     # ------------------------------------------------------------------
@@ -653,6 +739,7 @@ class ReadInvoiceWidget(QWidget):
 
         cols = list(df.columns)
         photo_col_name = "사진"
+        # 사진 컬럼은 맨 뒤에 추가
         cols_with_photo = cols + [photo_col_name]
 
         row_count = len(df)
@@ -664,15 +751,31 @@ class ReadInvoiceWidget(QWidget):
 
         self._col_index = {name: idx for idx, name in enumerate(cols_with_photo)}
 
+        # [색상 정의]
+        done_bg = QtGui.QColor(255, 255, 100)  # 노란색
+
         for row_idx in range(row_count):
+            # 행별 배경색 결정 ("작업유무" 컬럼 확인)
+            is_done = False
+            if "작업유무" in df.columns:
+                val = str(df.iloc[row_idx]["작업유무"]).strip()
+                if val == "완료":
+                    is_done = True
+
             for col_idx, col_name in enumerate(cols):
                 val = df.iloc[row_idx, col_idx]
                 text = "" if pd.isna(val) else str(val)
                 item = QTableWidgetItem(text)
+
+                # [핵심] 완료된 행이면 노란색 칠하기
+                if is_done:
+                    item.setBackground(done_bg)
+
                 if col_name in ("품목명", "상품명"):
                     item.setToolTip(text)
                 self.table.setItem(row_idx, col_idx, item)
 
+            # 사진 버튼 추가
             photo_col_idx = self._col_index[photo_col_name]
             btn = QPushButton()
             row_id = row_idx + 1
@@ -680,6 +783,10 @@ class ReadInvoiceWidget(QWidget):
             btn.setText(f"사진({count}장)…")
             btn.clicked.connect(self._make_photo_button_handler(row_idx))
             self.table.setCellWidget(row_idx, photo_col_idx, btn)
+
+            # 사진 버튼 칸도 배경색 맞춰주기 (선택사항)
+            if is_done:
+                btn.setStyleSheet("background-color: #ffffaa;")
 
         self.table.resizeColumnsToContents()
         self.table.resizeRowsToContents()
