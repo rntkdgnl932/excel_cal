@@ -38,24 +38,44 @@ from PyQt5.QtWidgets import (
 # ----------------------------------------------------------------------
 # COPY 다이얼로그: 파싱된 문구들 + 각 줄별 COPY 버튼
 # ----------------------------------------------------------------------
+
+
+
+# (기존 import 문에 QScrollArea가 없다면 추가해야 하지만,
+# 아래 코드처럼 QtWidgets.QScrollArea로 쓰면 import 수정 안 해도 됩니다.)
+
 class CopyLinesDialog(QDialog):
     def __init__(self, lines: List[str], parent=None):
         super().__init__(parent)
 
         self.setWindowTitle("문구 복사")
-        self.resize(600, 400)
+        self.resize(600, 500)  # 창 크기 고정 (이제 내용 많아도 스크롤 생김)
 
         self._line_edits: List[QLineEdit] = []
         self._buttons: List[QPushButton] = []
 
+        # 전체 레이아웃
         main_layout = QVBoxLayout(self)
 
+        # 1. 상단 안내 문구
+        top_layout = QVBoxLayout()
         info = QLabel("복사하려는 문구 옆의 [COPY] 버튼을 클릭하세요.")
-        main_layout.addWidget(info)
-
-        # 마지막 복사 상태 표시 라벨
         self.lbl_last = QLabel("마지막 복사: 없음")
-        main_layout.addWidget(self.lbl_last)
+        # 보기 좋게 스타일 좀 넣었습니다
+        self.lbl_last.setStyleSheet("color: blue; font-weight: bold;")
+
+        top_layout.addWidget(info)
+        top_layout.addWidget(self.lbl_last)
+        main_layout.addLayout(top_layout)
+
+        # 2. 스크롤 영역 (핵심!)
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
+
+        # 스크롤 안에 들어갈 실제 내용물 위젯
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
 
         for idx, text in enumerate(lines):
             row_layout = QHBoxLayout()
@@ -65,6 +85,7 @@ class CopyLinesDialog(QDialog):
             edit.setText(text)
 
             btn_copy = QPushButton("COPY")
+            btn_copy.setFixedWidth(80)
 
             # 핸들러 연결
             btn_copy.clicked.connect(self._make_copy_handler(idx, text))
@@ -72,45 +93,47 @@ class CopyLinesDialog(QDialog):
             row_layout.addWidget(edit, 1)
             row_layout.addWidget(btn_copy)
 
-            main_layout.addLayout(row_layout)
+            content_layout.addLayout(row_layout)
 
+            # 리스트에 저장 (나중에 색깔 바꾸려고)
             self._line_edits.append(edit)
             self._buttons.append(btn_copy)
 
+        # 내용이 적을 때 위로 붙게 함
+        content_layout.addStretch(1)
+
+        # 위젯 배치
+        content_widget.setLayout(content_layout)
+        scroll_area.setWidget(content_widget)
+
+        # 스크롤 영역을 메인 레이아웃에 추가
+        main_layout.addWidget(scroll_area, 1)
+
+        # 3. 하단 닫기 버튼
         btn_close = QPushButton("닫기")
         btn_close.clicked.connect(self.accept)
         main_layout.addWidget(btn_close)
 
     def _make_copy_handler(self, idx: int, text: str):
         def handler():
-            # 1) 클립보드 복사
             QApplication.clipboard().setText(text)
-            # 2) 표시 업데이트
             self._mark_copied(idx, text)
+
         return handler
 
     def _mark_copied(self, idx: int, text: str):
-        """
-        idx 번째 줄을 '마지막 복사'로 표시.
-        - 해당 줄 버튼: '✔ COPIED'
-        - 해당 줄 배경: 연한 노랑
-        - 다른 줄은 모두 초기화
-        """
         # 전부 초기화
         for btn in self._buttons:
             btn.setText("COPY")
         for edit in self._line_edits:
             edit.setStyleSheet("")
 
-        # 선택된 줄만 강조
+        # 선택된 줄 강조
         if 0 <= idx < len(self._buttons):
-            self._buttons[idx].setText("✔ COPIED")
+            self._buttons[idx].setText("✔ 완료")
         if 0 <= idx < len(self._line_edits):
-            self._line_edits[idx].setStyleSheet(
-                "background-color: #fff8c6;"  # 연한 노랑
-            )
+            self._line_edits[idx].setStyleSheet("background-color: #fff8c6;")  # 연한 노랑
 
-        # 라벨도 갱신
         self.lbl_last.setText(f"마지막 복사: {text}")
 
 
