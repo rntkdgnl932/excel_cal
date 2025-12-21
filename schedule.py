@@ -95,17 +95,21 @@ class GoogleCalendarSync:
         self.token_path = self.secrets_dir / "token.json"
 
     # ✅ 1) UI 스레드에서만 호출: 최초 로그인/승인(브라우저 열림)
-    def authorize_interactive(self) -> None:
+    # 기존 authorize_interactive 함수들(2개)을 전부 지우고 이 코드로 덮어쓰세요.
+    def authorize_interactive(self, parent=None) -> None:
+        """
+        UI 스레드에서 브라우저를 띄워 인증 (run_local_server 사용)
+        - parent 인자는 호출 호환성을 위해 남겨둠 (사용 안 함)
+        """
         if not self.secrets_dir.exists():
             self.secrets_dir.mkdir(parents=True, exist_ok=True)
 
         if not self.client_secret_path.is_file():
             raise FileNotFoundError(f"client_secret.json을 찾을 수 없습니다: {self.client_secret_path}")
 
+        # ✅ 중요: 여기서 run_local_server를 써야 redirect_uri 오류가 안 납니다.
         flow = InstalledAppFlow.from_client_secrets_file(str(self.client_secret_path), SCOPES)
-        creds = flow.run_local_server(port=0)  # ✅ UI 스레드에서만!
-
-        # creds = flow.run_console()
+        creds = flow.run_local_server(port=0)
 
         self.token_path.write_text(creds.to_json(), encoding="utf-8")
 
@@ -181,58 +185,7 @@ class GoogleCalendarSync:
                 break
         return out
 
-    def authorize_interactive(self, parent: QtWidgets.QWidget = None) -> None:
-        """
-        PyInstaller(EXE) 친화형 OAuth:
-        - 로컬 서버(redirect) 대신, 사용자가 브라우저에서 code를 복사해 GUI에 붙여넣는 방식
-        - 'Continue'가 warning 페이지에서 먹통인 환경에서도 통과되는 경우가 많음
-        """
-        if not self.secrets_dir.exists():
-            self.secrets_dir.mkdir(parents=True, exist_ok=True)
 
-        if not self.client_secret_path.is_file():
-            raise FileNotFoundError(f"client_secret.json을 찾을 수 없습니다: {self.client_secret_path}")
-
-        flow = InstalledAppFlow.from_client_secrets_file(str(self.client_secret_path), SCOPES)
-
-        # 1) 인증 URL 생성 (redirect_uri는 OOB/urn 기반으로 내부 처리)
-        auth_url, _ = flow.authorization_url(
-            access_type="offline",
-            include_granted_scopes="true",
-            prompt="consent",
-        )
-
-        # 2) 브라우저 열기(가능하면)
-        try:
-            import webbrowser
-            webbrowser.open(auth_url)
-        except Exception:
-            pass
-
-        # 3) 사용자에게 code 입력 받기 (GUI)
-        msg = (
-            "브라우저에서 구글 로그인/권한 허용을 진행한 뒤,\n"
-            "화면에 표시되는 'code' 값을 복사해서 아래에 붙여넣어 주세요.\n\n"
-            "만약 브라우저가 자동으로 열리지 않았다면, 아래 URL을 직접 열어주세요:\n"
-            f"{auth_url}\n"
-        )
-
-        code, ok = QtWidgets.QInputDialog.getText(
-            parent if parent is not None else None,
-            "구글 캘린더 연동 (인증 코드 입력)",
-            msg,
-        )
-        if not ok or not str(code).strip():
-            raise RuntimeError("인증 코드 입력이 취소되었습니다.")
-
-        # 4) code로 토큰 교환
-        flow.fetch_token(code=str(code).strip())
-
-        creds = flow.credentials
-        if creds is None:
-            raise RuntimeError("OAuth 인증에 실패했습니다. (credentials is None)")
-
-        self.token_path.write_text(creds.to_json(), encoding="utf-8")
 
 
 
