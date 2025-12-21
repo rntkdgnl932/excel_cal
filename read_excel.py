@@ -375,6 +375,12 @@ class ReadInvoiceWidget(QWidget):
         # -------------------------
         self.table = QTableWidget()
         self.table.setObjectName("ship_table")
+        self.table.setStyleSheet("""
+                    QTableWidget::item:selected {
+                        background-color: #87CEFA;  /* 연한 하늘색 (Light Sky Blue) */
+                        color: #000000;             /* 글자색은 검정 */
+                    }
+                """)
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
