@@ -9,9 +9,13 @@ import json
 import uuid
 from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
-from pathlib import Path
+from PyQt5.QtCore import QLocale
+from PyQt5.QtWidgets import QCalendarWidget
 from typing import Dict, List, Optional, Callable
-
+import os
+import sys
+import faulthandler
+from pathlib import Path
 from PyQt5 import QtWidgets, QtCore, QtGui
 
 # =========================================================
@@ -31,11 +35,7 @@ SCOPES = ["https://www.googleapis.com/auth/calendar"]
 
 #########################################################
 
-import os
-import sys
-import faulthandler
-from datetime import datetime
-from pathlib import Path
+
 
 # =========================
 # Crash logging (file-based)
@@ -395,11 +395,8 @@ class ScheduleEditDialog(QtWidgets.QDialog):
 
 class CalendarScheduleDelegate(QtWidgets.QStyledItemDelegate):
     """
-    달력 셀 커스텀 렌더링:
-      - 날짜 숫자: 왼쪽 위 정렬
-      - 셀 내부에 스케쥴 제목 1~2줄 표시(작은 글씨, 길면 …)
-      - 완료 스케쥴: 취소선
-      - 환경별 row/col 오프셋 문제를 "자동 보정(delta_days)"으로 해결
+    [수정됨] 델타(delta) 보정 로직을 완전 삭제하고
+    순수하게 연/월 계산으로만 날짜를 찍도록 변경. (Ghosting 해결)
     """
 
     def __init__(
@@ -416,12 +413,9 @@ class CalendarScheduleDelegate(QtWidgets.QStyledItemDelegate):
         self.max_lines = 5
         self.pad = 4
 
-        # 환경별 보정
-        self.delta_days = 0
-
-    def _cell_date_raw(self, row: int, col: int) -> QtCore.QDate:
+    def _cell_date(self, row: int, col: int) -> QtCore.QDate:
         """
-        (보정 전) row/col -> date
+        [핵심 수정] 델타값 없이 순수 계산으로 날짜 확정
         """
         year = self.calendar.yearShown()
         month = self.calendar.monthShown()
@@ -430,16 +424,11 @@ class CalendarScheduleDelegate(QtWidgets.QStyledItemDelegate):
         first_dow = int(self.calendar.firstDayOfWeek())  # 1=Mon ... 7=Sun
         month_dow = first_of_month.dayOfWeek()          # 1=Mon ... 7=Sun
 
+        # 달력 시작일(왼쪽 위 구석) 계산 로직
         offset = (month_dow - first_dow) % 7
         start_date = first_of_month.addDays(-offset)
 
         return start_date.addDays(row * 7 + col)
-
-    def _cell_date(self, row: int, col: int) -> QtCore.QDate:
-        """
-        (보정 후) row/col -> date
-        """
-        return self._cell_date_raw(row, col).addDays(self.delta_days)
 
     def paint(self, painter: QtGui.QPainter, option: QtWidgets.QStyleOptionViewItem, index: QtCore.QModelIndex):
         painter.save()
@@ -451,6 +440,7 @@ class CalendarScheduleDelegate(QtWidgets.QStyledItemDelegate):
         row = index.row()
         col = index.column()
 
+        # [수정] 이제 여기서 바로 날짜를 가져옴 (보정 없음)
         qdate = self._cell_date(row, col)
         date_str = qdate.toString("yyyy-MM-dd")
 
@@ -470,7 +460,19 @@ class CalendarScheduleDelegate(QtWidgets.QStyledItemDelegate):
             bg.setAlpha(140)
             painter.fillRect(outer, bg)
 
-        # 1) 날짜 숫자: 왼쪽 위
+        # 선택한 날짜 하이라이트
+        is_selected = bool(option.state & QtWidgets.QStyle.State_Selected)
+        if is_selected:
+            sel_bg = QtGui.QColor(210, 235, 255)  # 연파랑
+            sel_bg.setAlpha(210)
+            painter.fillRect(outer, sel_bg)
+
+            pen = QtGui.QPen(QtGui.QColor(120, 170, 255))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.drawRect(outer.adjusted(1, 1, -2, -2))
+
+        # 1) 날짜 숫자
         day_font = QtGui.QFont(option.font)
         day_font.setBold(True)
         painter.setFont(day_font)
@@ -486,7 +488,7 @@ class CalendarScheduleDelegate(QtWidgets.QStyledItemDelegate):
         day_rect = QtCore.QRect(rect.left(), rect.top(), rect.width(), day_h)
         painter.drawText(day_rect, QtCore.Qt.AlignLeft | QtCore.Qt.AlignTop, str(qdate.day()))
 
-        # 2) 셀 내부: 제목 리스트(작은 글씨)
+        # 2) 셀 내부: 제목 리스트
         if items:
             text_font = QtGui.QFont(option.font)
             text_font.setPointSize(max(8, text_font.pointSize() - 2))
@@ -559,29 +561,155 @@ class ScheduleWidget(QtWidgets.QWidget):
         title.setStyleSheet("font-weight: bold; font-size: 14px;")
         left.addWidget(title)
 
+        # -----------------------------
+        # Calendar (기본 요일 헤더 사용: 네비게이션바 아래에 자동 배치됨)
+        # -----------------------------
         self.calendar = QtWidgets.QCalendarWidget()
+        self.calendar.setNavigationBarVisible(False)  # 기본 "<- 12월 2025 ->" 숨김
+        self.calendar.setHorizontalHeaderFormat(QtWidgets.QCalendarWidget.NoHorizontalHeader)  # 기본 요일헤더 숨김
+        self.calendar.setVerticalHeaderFormat(QtWidgets.QCalendarWidget.NoVerticalHeader)  # 왼쪽 1,2,3... 같은거 숨김
+        self.calendar.setFirstDayOfWeek(QtCore.Qt.Sunday)  # 일요일 시작
         self.calendar.setGridVisible(True)
-        self.calendar.setVerticalHeaderFormat(QtWidgets.QCalendarWidget.NoVerticalHeader)
-        self.calendar.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
 
-        # 달력을 “왼쪽 영역에 꽉” 채우기: 최소 크기만 잡고, 아래 요소는 최소화
+        # ✅ 한국 로케일(표시 안정화)
+        try:
+            self.calendar.setLocale(QtCore.QLocale(QtCore.QLocale.Korean, QtCore.QLocale.SouthKorea))
+        except Exception:
+            pass
+
+        self.calendar.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
         self.calendar.setMinimumSize(860, 720)
+
+        # ✅ 이제 달력 자체만 넣으면,
+
+        # =========================================================
+        # 네비게이션 바 (외부):  ◀  [월 콤보] [연도 콤보]  ▶
+        # =========================================================
+        nav_bar = QtWidgets.QWidget()
+        nav_bar.setObjectName("calNavBar")
+        nav_lay = QtWidgets.QHBoxLayout(nav_bar)
+        nav_lay.setContentsMargins(6, 0, 6, 0)
+        nav_lay.setSpacing(8)
+
+        btn_prev = QtWidgets.QToolButton()
+        btn_prev.setObjectName("calPrevBtn")
+        btn_prev.setText("◀")
+        btn_prev.setCursor(QtCore.Qt.PointingHandCursor)
+
+        btn_next = QtWidgets.QToolButton()
+        btn_next.setObjectName("calNextBtn")
+        btn_next.setText("▶")
+        btn_next.setCursor(QtCore.Qt.PointingHandCursor)
+
+        cb_month = QtWidgets.QComboBox()
+        cb_month.setObjectName("calMonthCombo")
+        for m in range(1, 13):
+            cb_month.addItem(f"{m}월", m)
+
+        cb_year = QtWidgets.QComboBox()
+        cb_year.setObjectName("calYearCombo")
+        # 연도 범위는 넉넉히
+        for y in range(2020, 2036):
+            cb_year.addItem(str(y), y)
+
+        nav_lay.addWidget(btn_prev, 0)
+        nav_lay.addStretch(1)
+        nav_lay.addWidget(cb_month, 0)
+        nav_lay.addWidget(cb_year, 0)
+        nav_lay.addStretch(1)
+        nav_lay.addWidget(btn_next, 0)
+
+        # 현재 달력 페이지로 콤보 초기화
+        cb_month.setCurrentIndex(self.calendar.monthShown() - 1)
+        y_now = self.calendar.yearShown()
+        idx_y = cb_year.findData(y_now)
+        if idx_y >= 0:
+            cb_year.setCurrentIndex(idx_y)
+
+        def _sync_combo_from_calendar():
+            cb_month.blockSignals(True)
+            cb_year.blockSignals(True)
+            cb_month.setCurrentIndex(self.calendar.monthShown() - 1)
+            idx = cb_year.findData(self.calendar.yearShown())
+            if idx >= 0:
+                cb_year.setCurrentIndex(idx)
+            cb_month.blockSignals(False)
+            cb_year.blockSignals(False)
+
+        def _apply_combo_to_calendar():
+            y = int(cb_year.currentData())
+            m = int(cb_month.currentData())
+            self.calendar.setCurrentPage(y, m)
+            # ✅ 월 이동 후 "클릭해야 정렬" 문제 방지: 바로 동기화
+            QtCore.QTimer.singleShot(0, self._after_calendar_navigate)
+
+        btn_prev.clicked.connect(self.calendar.showPreviousMonth)
+        btn_next.clicked.connect(self.calendar.showNextMonth)
+
+        cb_month.currentIndexChanged.connect(lambda *_: _apply_combo_to_calendar())
+        cb_year.currentIndexChanged.connect(lambda *_: _apply_combo_to_calendar())
+
+        btn_next.clicked.connect(lambda: (self.calendar.showNextMonth(),
+                                          _sync_combo_from_calendar(),
+                                          QtCore.QTimer.singleShot(0, self._after_calendar_navigate)))
+
+        cb_month.currentIndexChanged.connect(lambda *_: _apply_combo_to_calendar())
+        cb_year.currentIndexChanged.connect(lambda *_: _apply_combo_to_calendar())
+
+        left.addWidget(nav_bar)
+
+        # =========================================================
+        # 요일 헤더(외부): 일~토 (네비게이션 바 아래에 위치)
+        # =========================================================
+        weekday_bar = QtWidgets.QWidget()
+        weekday_bar.setObjectName("weekdayBar")
+        hb = QtWidgets.QHBoxLayout(weekday_bar)
+        hb.setContentsMargins(10, 0, 10, 0)
+        hb.setSpacing(0)
+
+        for i, t in enumerate(["일", "월", "화", "수", "목", "금", "토"]):
+            lb = QtWidgets.QLabel(t)
+            lb.setAlignment(QtCore.Qt.AlignCenter)
+            lb.setMinimumHeight(28)
+
+            if i == 0:
+                lb.setObjectName("weekdaySun")
+            elif i == 6:
+                lb.setObjectName("weekdaySat")
+            else:
+                lb.setObjectName("weekdayWeek")
+
+            hb.addWidget(lb, 1)
+
+        left.addWidget(weekday_bar)
+
+        #    [네비게이션바(<- 12월 2025 ->)] 아래에 [요일(일~토)]이 자동 표시됨
+        left.addWidget(self.calendar, 1)
 
         # 내부 테이블 뷰 확보 후 delegate 장착
         self._cal_view = self.calendar.findChild(QtWidgets.QTableView)
         if self._cal_view is None:
             raise RuntimeError("QCalendarWidget 내부 QTableView를 찾지 못했습니다.")
 
+        # ✅ 달력 테이블 기본 상호작용 정리(선택/편집 방지)
+        self._cal_view.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self._cal_view.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectItems)
+        self._cal_view.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
+
+        # ✅ 휠/화살표 이동 시에도 "바로" 정렬/선택/하이라이트가 맞도록 훅 설치
+        self._install_calendar_nav_hooks()
+
+
         self._cal_delegate = CalendarScheduleDelegate(
             self.calendar,
             self._cal_view,
             get_items_for_date=self._get_items_for_date_for_calendar,
         )
-        # 셀에 제목 5개까지 표시
         self._cal_delegate.max_lines = 5
         self._cal_view.setItemDelegate(self._cal_delegate)
 
-        left.addWidget(self.calendar, 1)
+        # ✅ 클릭한 날짜가 확실히 보이도록: 선택 변경 시 뷰 갱신
+        self.calendar.selectionChanged.connect(lambda: self._cal_view.viewport().update())
 
         # 하단: 선택 날짜 라벨 + 버튼 (달력 밑에 얇게)
         self.lbl_date = QtWidgets.QLabel("선택 날짜: -")
@@ -653,7 +781,7 @@ class ScheduleWidget(QtWidgets.QWidget):
         # 시그널
         # =========================================
         self.calendar.selectionChanged.connect(self._on_date_changed)
-        self.calendar.currentPageChanged.connect(lambda *_: self._calibrate_calendar_delta())
+        self.calendar.currentPageChanged.connect(self._on_calendar_page_changed)
 
         self.btn_add.clicked.connect(self._on_add_clicked)
         self.btn_edit.clicked.connect(self._on_edit_clicked)
@@ -668,7 +796,6 @@ class ScheduleWidget(QtWidgets.QWidget):
         # =========================================
         # 초기 보정 + 초기 갱신
         # =========================================
-        self._calibrate_calendar_delta()
         self._on_date_changed()
         self._refresh_all_list()
         self._select_first_item_if_any()
@@ -705,6 +832,100 @@ class ScheduleWidget(QtWidgets.QWidget):
                 self.calendar.updateCells()
             except Exception:
                 self.calendar.viewport().update()
+
+    # =========================================================
+    # Calendar navigation sync (arrow / wheel)  ✅ 핵심
+    # =========================================================
+    def _install_calendar_nav_hooks(self) -> None:
+        # 휠 이벤트는 QCalendarWidget 자체 또는 내부 viewport로 들어올 수 있어서 둘 다 훅
+        self.calendar.installEventFilter(self)
+        if hasattr(self, "_cal_view") and self._cal_view is not None:
+            self._cal_view.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        # 마우스 휠로 월 이동 시
+        if event.type() == QtCore.QEvent.Wheel:
+            # 휠 동작은 기본 QCalendarWidget이 처리하게 두고(return False),
+            # 처리가 끝난 직후(0ms 뒤)에 보정 로직만 한번 더 수행
+            QtCore.QTimer.singleShot(0, self._after_calendar_navigate)
+            return False
+        return super().eventFilter(obj, event)
+
+    def _on_calendar_page_changed(self, year: int, month: int) -> None:
+        """
+        [수정됨] 페이지 변경 시 콤보박스만 동기화.
+        날짜 강제 이동이나 보정 로직은 제거 (Ghosting 원인 제거)
+        """
+        self.findChild(QtWidgets.QComboBox, "calYearCombo").blockSignals(True)
+        self.findChild(QtWidgets.QComboBox, "calMonthCombo").blockSignals(True)
+
+        idx_y = self.findChild(QtWidgets.QComboBox, "calYearCombo").findData(year)
+        if idx_y >= 0:
+            self.findChild(QtWidgets.QComboBox, "calYearCombo").setCurrentIndex(idx_y)
+        self.findChild(QtWidgets.QComboBox, "calMonthCombo").setCurrentIndex(month - 1)
+
+        self.findChild(QtWidgets.QComboBox, "calYearCombo").blockSignals(False)
+        self.findChild(QtWidgets.QComboBox, "calMonthCombo").blockSignals(False)
+
+        # 뷰 갱신
+        self._refresh_calendar_view()
+
+    def _after_calendar_navigate(self) -> None:
+        try:
+            # [수정] 보정 로직 삭제
+            self._force_select_cell_for_selected_date()
+            self._refresh_calendar_view()
+        except Exception:
+            pass
+
+    def _force_select_cell_for_selected_date(self) -> None:
+        """
+        선택 날짜 연파랑이 안 보이는 주 원인:
+        - 실제로 QTableView의 currentIndex가 선택 셀로 잡혀있지 않아서
+          delegate의 State_Selected가 안 들어오는 경우가 있음.
+        여기서 강제로 currentIndex를 해당 날짜 셀로 맞춘다.
+        """
+        if not hasattr(self, "_cal_view") or self._cal_view is None:
+            return
+
+        qd = self.calendar.selectedDate()
+        if not qd.isValid():
+            return
+
+        y = self.calendar.yearShown()
+        m = self.calendar.monthShown()
+
+        # 달력이 표시하는 첫 셀(start_date) 계산 (delegate와 동일 로직, delta는 적용 전)
+        first_of_month = QtCore.QDate(y, m, 1)
+        first_dow = int(self.calendar.firstDayOfWeek())   # 1=Mon..7=Sun
+        month_dow = first_of_month.dayOfWeek()           # 1=Mon..7=Sun
+        offset = (month_dow - first_dow) % 7
+        start_date = first_of_month.addDays(-offset)
+
+        # delta_days 적용해서 "실제 표시되는 셀 날짜" 기준으로 맞춤
+        delta = int(getattr(self._cal_delegate, "delta_days", 0))
+        start_date = start_date.addDays(delta)
+
+        days = start_date.daysTo(qd)
+        if days < 0 or days >= 6 * 7:
+            # 선택 날짜가 현재 그리드 범위를 벗어나면(이론상 거의 없음) 무시
+            return
+
+        row = days // 7
+        col = days % 7
+
+        model = self._cal_view.model()
+        if model is None:
+            return
+
+        idx = model.index(row, col)
+        if idx.isValid():
+            self._cal_view.setCurrentIndex(idx)
+            self._cal_view.selectionModel().select(
+                idx,
+                QtCore.QItemSelectionModel.ClearAndSelect | QtCore.QItemSelectionModel.Current
+            )
+
 
     # ---------- List rendering ----------
     def _apply_completed_style(self, item: QtWidgets.QListWidgetItem, completed: bool) -> None:
@@ -774,9 +995,7 @@ class ScheduleWidget(QtWidgets.QWidget):
 
     # ---------- Events ----------
     def _on_date_changed(self) -> None:
-        # 클릭할 때마다 보정 먼저(셀-날짜 싱크 맞춤)
-        self._calibrate_calendar_delta()
-
+        # [수정] 보정 로직 삭제됨
         qdate = self.calendar.selectedDate()
         date_str = qdate.toString("yyyy-MM-dd (ddd)")
         self.lbl_date.setText(f"선택 날짜: {date_str}")
@@ -978,31 +1197,7 @@ class ScheduleWidget(QtWidgets.QWidget):
 
         self._run_async("스케쥴 삭제", job, done)
 
-    def _calibrate_calendar_delta(self) -> None:
-        """
-        현재 선택된 셀(row/col)에 대해:
-          - delegate가 계산한 날짜(보정 전) vs calendar.selectedDate()를 비교
-          - 차이를 delta_days로 저장 -> 이후 그리기가 선택과 일치하게 됨
-        """
-        if not hasattr(self, "_cal_view") or self._cal_view is None:
-            return
-        if not hasattr(self, "_cal_delegate") or self._cal_delegate is None:
-            return
 
-        idx = self._cal_view.currentIndex()
-        if not idx.isValid():
-            return
-
-        row = idx.row()
-        col = idx.column()
-
-        raw = self._cal_delegate._cell_date_raw(row, col)
-        selected = self.calendar.selectedDate()
-
-        if raw.isValid() and selected.isValid():
-            # raw에서 selected까지 몇 일 차이인지
-            delta = raw.daysTo(selected)
-            self._cal_delegate.delta_days = delta
 
     def _get_selected_day_item_id(self) -> Optional[str]:
         cur = self.day_list.currentItem()

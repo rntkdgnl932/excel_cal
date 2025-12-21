@@ -213,16 +213,45 @@ class MainTabbedWindow(QtWidgets.QMainWindow):
 
         # 2. 네이버/쿠팡 송장 엑셀 읽기 탭
         self.read_invoice_widget = ReadInvoiceWidget(self)
+        self.read_invoice_widget.setObjectName("tab_dark")  # ✅ QSS 타겟
         tabs.addTab(self.read_invoice_widget, "네이버·쿠팡 송장 엑셀 읽기")
 
         # 3. 스케쥴 탭
         self.schedule_widget = ScheduleWidget(self)
+        self.schedule_widget.setObjectName("tab_blue")  # ✅ 3탭 전용 QSS 타겟
         tabs.addTab(self.schedule_widget, "스케쥴")
 
         # 4. Git 업데이트 탭
         base_dir = Path(__file__).resolve().parent  # 보통 C:\my_games\excel_cal
         self.update_widget = UpdateWidget(base_dir, self)
         tabs.addTab(self.update_widget, "업데이트 (git pull)")
+
+        # --------------------------
+        # ✅ 탭별 테마(핑크/다크/블루/오렌지) 적용을 위한 이름/프로퍼티
+        # --------------------------
+        self.cal_window.setObjectName("tab_pink")
+        self.read_invoice_widget.setObjectName("tab_dark")
+        self.schedule_widget.setObjectName("tab_blue")
+        self.update_widget.setObjectName("tab_orange")
+
+        theme_by_index = {
+            0: "pink",    # 부가세 계산 / 3종 엑셀
+            1: "dark",    # 네이버·쿠팡 송장
+            2: "blue",    # 스케쥴
+            3: "orange",  # 업데이트
+        }
+
+        def _apply_theme_for_index(idx: int) -> None:
+            theme = theme_by_index.get(idx, "pink")
+            tabs.setProperty("theme", theme)
+            # 스타일 재적용(선택탭 색상까지 변경)
+            tabs.style().unpolish(tabs)
+            tabs.style().polish(tabs)
+            tabs.update()
+
+        tabs.currentChanged.connect(_apply_theme_for_index)
+        _apply_theme_for_index(tabs.currentIndex())
+
 
 
         # 여기서 한 번만 상태 새로고침 호출 → "도달할 수 없습니다" 경고 안 뜸

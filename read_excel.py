@@ -312,21 +312,26 @@ class ReadInvoiceWidget(QWidget):
         self.current_df: Optional[pd.DataFrame] = None
         self.current_file: Optional[str] = None
 
-        # 이미지 매핑: row_id(1부터) -> [파일명, ...]
         self._image_map: Dict[int, List[str]] = {}
         self._image_dir: Optional[Path] = None
         self._meta_path: Optional[Path] = None
 
-        # 테이블 컬럼 이름 → index 매핑
         self._col_index: Dict[str, int] = {}
         self._current_row_idx: Optional[int] = None
 
         main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(14, 14, 14, 14)
+        main_layout.setSpacing(12)
 
-        # 상단
-        top_layout = QHBoxLayout()
+        # -------------------------
+        # 상단 컨트롤 바 (ship_top)
+        # -------------------------
+        top_wrap = QWidget(self)
+        top_wrap.setObjectName("ship_top")
+        top_layout = QHBoxLayout(top_wrap)
+        top_layout.setContentsMargins(12, 10, 12, 10)
+        top_layout.setSpacing(10)
+
         lbl_type = QLabel("송장 타입:")
         self.combo_type = QComboBox()
         self.combo_type.addItems(["네이버 송장", "쿠팡 송장"])
@@ -335,25 +340,34 @@ class ReadInvoiceWidget(QWidget):
 
         top_layout.addWidget(lbl_type)
         top_layout.addWidget(self.combo_type)
-        top_layout.addSpacing(20)
+        top_layout.addSpacing(14)
         top_layout.addWidget(self.lbl_file, 1)
-        top_layout.addSpacing(20)
+        top_layout.addSpacing(14)
         top_layout.addWidget(self.btn_open)
-        main_layout.addLayout(top_layout)
 
-        # 테이블
+        main_layout.addWidget(top_wrap)
+
+        # -------------------------
+        # 테이블 (ship_table)
+        # -------------------------
         self.table = QTableWidget()
+        self.table.setObjectName("ship_table")
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(True)
         main_layout.addWidget(self.table, 1)
 
-        # 문자 전송 패널
+        # -------------------------
+        # 문자 전송 패널 (ship_sms)
+        # -------------------------
         self._build_sms_panel(main_layout)
 
-        # 로그
+        # -------------------------
+        # 로그 (ship_log)
+        # -------------------------
         self.log = QPlainTextEdit()
+        self.log.setObjectName("ship_log")
         self.log.setReadOnly(True)
         self.log.setFixedHeight(150)
         main_layout.addWidget(self.log)
@@ -368,10 +382,15 @@ class ReadInvoiceWidget(QWidget):
     # ------------------------------------------------------------------
     def _build_sms_panel(self, parent_layout: QVBoxLayout):
         grp = QGroupBox("문자 전송")
+        grp.setObjectName("ship_sms")
+
         layout = QHBoxLayout(grp)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(12)
 
         # 왼쪽: 선택 고객 정보
         left_box = QVBoxLayout()
+        left_box.setSpacing(6)
         self.lbl_sms_target = QLabel("선택 고객: (없음)")
         self.lbl_sms_count = QLabel("문구개수: -")
         left_box.addWidget(self.lbl_sms_target)
@@ -381,8 +400,10 @@ class ReadInvoiceWidget(QWidget):
 
         # 가운데: 예약 시간 + 버튼들
         mid_box = QVBoxLayout()
+        mid_box.setSpacing(10)
 
         time_box = QHBoxLayout()
+        time_box.setSpacing(8)
         lbl_time = QLabel("보내는 시간:")
         self.dt_send = QDateTimeEdit(QDateTime.currentDateTime())
         self.dt_send.setCalendarPopup(True)
@@ -391,11 +412,12 @@ class ReadInvoiceWidget(QWidget):
         self.chk_send_now.toggled.connect(self._on_send_now_toggled)
 
         time_box.addWidget(lbl_time)
-        time_box.addWidget(self.dt_send)
+        time_box.addWidget(self.dt_send, 1)
         time_box.addWidget(self.chk_send_now)
         mid_box.addLayout(time_box)
 
         btn_box = QHBoxLayout()
+        btn_box.setSpacing(10)
         self.btn_send_selected = QPushButton("선택 고객에게 보내기")
         self.btn_send_all = QPushButton("표시된 전체 고객에게 일괄 보내기")
         btn_box.addWidget(self.btn_send_selected)
@@ -407,11 +429,11 @@ class ReadInvoiceWidget(QWidget):
 
         # 오른쪽: 대표 이미지 미리보기
         right_box = QVBoxLayout()
+        right_box.setSpacing(8)
         self.lbl_img_preview = QLabel("대표 이미지\n미리보기 없음")
         self.lbl_img_preview.setFrameShape(QLabel.Box)
-        # noinspection PyUnresolvedReferences
         self.lbl_img_preview.setAlignment(Qt.AlignCenter)
-        self.lbl_img_preview.setFixedSize(160, 160)
+        self.lbl_img_preview.setFixedSize(150, 150)
 
         self.lbl_img_name = QLabel("")
         right_box.addWidget(self.lbl_img_preview)
