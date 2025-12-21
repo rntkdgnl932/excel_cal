@@ -5,7 +5,7 @@ import sys
 import subprocess
 from pathlib import Path
 
-from PyQt5 import QtWidgets
+from PyQt5 import QtWidgets, QtCore
 
 from excel_cal_ui import ExcelCalWindow      # 기존 부가세/3종 엑셀 UI
 from read_excel import ReadInvoiceWidget     # 송장 읽기 탭
@@ -55,10 +55,6 @@ class UpdateWidget(QtWidgets.QWidget):
         self.btn_refresh.clicked.connect(self.on_refresh_clicked)
         self.btn_pull.clicked.connect(self.on_pull_clicked)
 
-        # NOTE:
-        # 여기서 self.on_refresh_clicked()를 바로 호출하면
-        # 일부 검사기에서 "도달할 수 없습니다" 경고가 뜰 수 있으니
-        # MainTabbedWindow 쪽에서 초기 1회 호출하도록 함.
 
     # ---------------------------
     # 내부 유틸: 로그/경로/실행
@@ -193,6 +189,24 @@ class MainTabbedWindow(QtWidgets.QMainWindow):
         tabs = QtWidgets.QTabWidget(self)
         self.setCentralWidget(tabs)
 
+        force_tab_size_only(tabs, tab_w=200, tab_h=52)  # ✅ 탭 크기만 강제
+
+        # ✅ 탭 글자 잘림 방지 (탭 바/폰트/패딩)
+        tabbar = tabs.tabBar()
+        tabbar.setElideMode(QtCore.Qt.ElideNone)      # "..." 생략 금지
+        tabbar.setUsesScrollButtons(True)            # 탭 많으면 스크롤 버튼
+        tabbar.setExpanding(False)                   # 탭이 균등 확장되며 잘리는 현상 방지
+
+        # 탭/입력창이 너무 큰 기본 폰트가 잡혀있으면 강제로 정리
+        # (QSS가 적용되더라도 기본 폰트가 크면 내부 위젯들이 같이 커지는 경우가 있음)
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            f = app.font()
+            # 너무 커져 있으면 내려줌 (원하면 숫자만 조절)
+            if f.pointSize() <= 0 or f.pointSize() > 11:
+                f.setPointSize(10)
+                app.setFont(f)
+
         # 1. 기존 부가세/3종 엑셀 생성기 탭
         self.cal_window = ExcelCalWindow()
         tabs.addTab(self.cal_window, "부가세 계산 / 3종 엑셀")
@@ -201,7 +215,7 @@ class MainTabbedWindow(QtWidgets.QMainWindow):
         self.read_invoice_widget = ReadInvoiceWidget(self)
         tabs.addTab(self.read_invoice_widget, "네이버·쿠팡 송장 엑셀 읽기")
 
-        # 3. 스케쥴 탭 (추가)
+        # 3. 스케쥴 탭
         self.schedule_widget = ScheduleWidget(self)
         tabs.addTab(self.schedule_widget, "스케쥴")
 
@@ -210,16 +224,269 @@ class MainTabbedWindow(QtWidgets.QMainWindow):
         self.update_widget = UpdateWidget(base_dir, self)
         tabs.addTab(self.update_widget, "업데이트 (git pull)")
 
+
         # 여기서 한 번만 상태 새로고침 호출 → "도달할 수 없습니다" 경고 안 뜸
         self.update_widget.on_refresh_clicked()
 
 
+def _resource_path(rel: str) -> Path:
+    """
+    pyinstaller(onefile)에서도 동작하도록 리소스 경로를 계산
+    - 개발 실행: excel_ui.py가 있는 폴더 기준
+    - exe 실행: sys._MEIPASS 기준
+    """
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / rel
+
+
+def _apply_app_style(app) -> None:
+    """
+    1) app_style.qss가 있으면 우선 적용
+    2) 없어도 기본 스타일(탭/입력창 최소 높이, 과도한 폰트 방지)을 강제로 적용
+    """
+    qss_path = _resource_path("app_style.qss")
+    base_qss = r"""
+    /* --------- 전체 기본 --------- */
+    QWidget {
+        font-size: 10pt;
+    }
+
+    /* --------- 탭 글자 잘림 방지 --------- */
+    QTabWidget::pane {
+        border: 1px solid #e6e6e6;
+        top: -1px;
+        background: #fbfbfd;
+    }
+    QTabBar::tab {
+        min-height: 34px;            /* ✅ 탭 높이 확보 */
+        padding: 6px 14px;           /* ✅ 글자 좌우/상하 여백 */
+        margin-right: 6px;
+        border: 1px solid #e6e6e6;
+        border-bottom: none;
+        border-top-left-radius: 10px;
+        border-top-right-radius: 10px;
+        background: #f2f3f7;         /* 흰색 눈부심 줄임 */
+        color: #222;
+    }
+    QTabBar::tab:selected {
+        background: #fff1f3;         /* 은은한 핑크/레드 계열 */
+        border-color: #f0b6c1;
+        color: #111;
+        font-weight: 600;
+    }
+    QTabBar::tab:hover {
+        background: #ffe4e8;
+    }
+
+    /* --------- 입력창(placeholder/값) 안 보임 방지 --------- */
+    QLineEdit, QDateEdit, QComboBox, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {
+        min-height: 28px;            /* ✅ 글자 높이 확보 */
+        padding: 4px 10px;           /* ✅ 내부 여백 */
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        background: #ffffff;
+        color: #111111;
+    }
+    QLineEdit:focus, QDateEdit:focus, QComboBox:focus, QTextEdit:focus, QPlainTextEdit:focus {
+        border: 1px solid #f0b6c1;
+        background: #fffafb;
+    }
+
+    /* --------- 그룹박스/라벨 기본 --------- */
+    QGroupBox {
+        border: 1px solid #ececec;
+        border-radius: 10px;
+        margin-top: 12px;
+        background: #fbfbfd;
+    }
+    QGroupBox::title {
+        subcontrol-origin: margin;
+        subcontrol-position: top left;
+        padding: 0 6px;
+        left: 10px;
+        color: #333;
+        font-weight: 600;
+    }
+    QLabel {
+        color: #222;
+    }
+
+    /* --------- 버튼(은은한 레드 포인트) --------- */
+    QPushButton {
+        min-height: 30px;
+        padding: 6px 14px;
+        border-radius: 10px;
+        border: 1px solid #f0b6c1;
+        background: #fff1f3;
+        color: #111;
+        font-weight: 600;
+    }
+    QPushButton:hover {
+        background: #ffe4e8;
+    }
+    QPushButton:pressed {
+        background: #ffd3da;
+    }
+    """
+
+    # 1) 파일 QSS가 있으면 읽어서 적용 + base_qss를 뒤에 덧붙여 "안전장치"로 강제
+    if qss_path.is_file():
+        try:
+            file_qss = qss_path.read_text(encoding="utf-8")
+        except Exception:
+            file_qss = qss_path.read_text(encoding="utf-8", errors="replace")
+        app.setStyleSheet(file_qss + "\n\n" + base_qss)
+    else:
+        # 2) qss 파일이 없으면 base_qss만 적용
+        app.setStyleSheet(base_qss)
+
+
+
+def install_global_exception_dump(log_dir: str) -> None:
+    """
+    프로그램이 시작하자마자 꺼지는 경우(콘솔이 닫혀서 안 보이는 예외)를 파일로 남긴다.
+    - exception_dump.log에 traceback 기록
+    """
+    import os
+    import sys
+    import traceback
+    from datetime import datetime
+    from pathlib import Path
+
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
+    dump_path = Path(log_dir) / "exception_dump.log"
+
+    def _write_dump(prefix: str, exc_type, exc, tb):
+        try:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            msg = "".join(traceback.format_exception(exc_type, exc, tb))
+            with dump_path.open("a", encoding="utf-8") as f:
+                f.write("\n" + "=" * 80 + "\n")
+                f.write(f"[{ts}] {prefix}\n")
+                f.write(msg + "\n")
+        except Exception:
+            pass
+
+    def excepthook(exc_type, exc, tb):
+        _write_dump("sys.excepthook", exc_type, exc, tb)
+
+    sys.excepthook = excepthook
+
+    # Qt 쪽 예외도 최대한 남기기(일부 환경에서만 동작)
+    try:
+        from PyQt5 import QtCore
+
+        def qt_message_handler(mode, context, message):
+            # Qt 내부 경고/에러도 파일로
+            try:
+                ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                with dump_path.open("a", encoding="utf-8") as f:
+                    f.write("\n" + "-" * 80 + "\n")
+                    f.write(f"[{ts}] QtMessage: {message}\n")
+            except Exception:
+                pass
+
+        QtCore.qInstallMessageHandler(qt_message_handler)
+    except Exception:
+        pass
+
+def force_tab_size_only(tabs: QtWidgets.QTabWidget, *, tab_w: int = 700, tab_h: int = 50) -> None:
+    """
+    '탭 크기만' 강제로 적용.
+    - QSS가 있어도 무조건 커짐
+    - 다른 위젯/스타일 안 건드림
+    """
+    old = tabs.tabBar()
+    new_bar = FixedSizeTabBar(tab_w=tab_w, tab_h=tab_h, parent=tabs)
+
+    # 기존 탭바의 일부 설정 승계(선택사항)
+    try:
+        new_bar.setMovable(old.isMovable())
+        new_bar.setTabsClosable(old.tabsClosable())
+        new_bar.setDrawBase(old.drawBase())
+    except Exception:
+        pass
+
+    tabs.setTabBar(new_bar)
+
+    # 탭바 높이도 확실히 확보(세로 잘림 방지)
+    new_bar.setMinimumHeight(tab_h)
+
+
+
+class FixedSizeTabBar(QtWidgets.QTabBar):
+    """
+    탭 크기만 강제로 고정하는 TabBar.
+    QSS/레이아웃이 뭐라고 하든 tabSizeHint를 고정해서 '진짜로' 탭 크기가 커진다.
+    """
+    def __init__(self, tab_w: int = 280, tab_h: int = 46, parent=None):
+        super().__init__(parent)
+        self._tab_w = int(tab_w)
+        self._tab_h = int(tab_h)
+
+        # 탭이 많아지면 스크롤 버튼
+        self.setUsesScrollButtons(True)
+        # 균등분배로 폭 쪼개지는 것 방지
+        self.setExpanding(False)
+
+    def set_tab_size(self, tab_w: int, tab_h: int) -> None:
+        self._tab_w = int(tab_w)
+        self._tab_h = int(tab_h)
+        self.updateGeometry()
+        self.update()
+
+    def tabSizeHint(self, index: int) -> QtCore.QSize:
+        base = super().tabSizeHint(index)
+        w = max(base.width(), self._tab_w)
+        h = max(base.height(), self._tab_h)
+        return QtCore.QSize(w, h)
+
+
+
 def main():
+    import sys
+    from pathlib import Path
+    from PyQt5 import QtWidgets
+
+    # ✅ 로그 폴더 경로 (네가 쓰는 경로로 고정)
+    log_dir = r"C:\my_games\excel_cal\log"
+    install_global_exception_dump(log_dir)
+
     app = QtWidgets.QApplication(sys.argv)
-    win = MainTabbedWindow()
-    win.show()
-    sys.exit(app.exec_())
+
+    # (선택) 스타일 적용은 여기서 하되, 실패해도 절대 죽지 않게
+    try:
+        base_dir = Path(__file__).resolve().parent
+        qss_path = base_dir / "app_style.qss"
+        if qss_path.exists():
+            app.setStyleSheet(qss_path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+
+    try:
+        win = MainTabbedWindow()
+        win.show()
+        sys.exit(app.exec_())
+    except Exception as e:
+        # 여기서 죽어도 exception_dump.log에 남게 된다
+        raise
+
+
+
 
 
 if __name__ == "__main__":
     main()
+
+
+
+# python -m PyInstaller `
+#   --noconfirm `
+#   --clean `
+#   --name excel_cal `
+#   --icon "icon.ico" `
+#   --add-data "icon.ico;." `
+#   --add-data "app_style.qss;." `
+#   --hidden-import PyQt5 `
+#   main.py
+

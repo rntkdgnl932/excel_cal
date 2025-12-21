@@ -41,115 +41,180 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         super().__init__(parent)
 
         self.setWindowTitle("하비 브라운 부가세·할인 엑셀 생성기")
-        self.resize(1100, 750)
+        self.resize(1180, 820)
 
         self.df_list = None
 
-        self._last_items_computed = None  # (더 이상 사용 안 함)
-
         central = QtWidgets.QWidget(self)
         self.setCentralWidget(central)
-        main_layout = QtWidgets.QVBoxLayout(central)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
+
+        root = QtWidgets.QVBoxLayout(central)
+        # ✅ 전체 여백/간격은 기존 유지 (필요 시 여기서도 조절 가능)
+        root.setContentsMargins(10, 10, 10, 10)
+        root.setSpacing(10)
 
         base_dir = Path(__file__).resolve().parent
 
-        # ------------------------------------------------------------------
-        # 거래처 정보
-        # ------------------------------------------------------------------
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
+        splitter.setChildrenCollapsible(False)
+        root.addWidget(splitter, 1)
+
+        # --------------------------
+        # 상단: 스크롤(작게)
+        # --------------------------
+        top_scroll = QtWidgets.QScrollArea()
+        top_scroll.setWidgetResizable(True)
+        top_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+
+        top_host = QtWidgets.QWidget()
+        top_lay = QtWidgets.QVBoxLayout(top_host)
+
+        # ✅ 여기 spacing을 늘려서 카드(거래처정보/총액/템플릿) 사이가 숨쉬게 함
+        top_lay.setContentsMargins(0, 0, 0, 0)
+        top_lay.setSpacing(12)
+
+        top_scroll.setWidget(top_host)
+        splitter.addWidget(top_scroll)
+
+        def _mk_label(text: str, w: int = 110) -> QtWidgets.QLabel:
+            lb = QtWidgets.QLabel(text)
+            lb.setFixedWidth(w)
+            lb.setAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
+            return lb
+
+        # --------------------------
+        # 거래처 정보 (여백/간격 개선)
+        # --------------------------
         grp_info = QtWidgets.QGroupBox("거래처 정보")
+        grp_info.setProperty("card", True)
+
+
+
         layout_info = QtWidgets.QGridLayout(grp_info)
+
+        # ✅ 핵심: 안쪽 여백/행 간격을 확실히 늘림
+        layout_info.setContentsMargins(14, 14, 14, 14)
+        layout_info.setHorizontalSpacing(14)
+        layout_info.setVerticalSpacing(12)
+
         layout_info.setColumnStretch(1, 1)
         layout_info.setColumnStretch(3, 1)
 
+        # ✅ 행 자체의 최소 높이를 확보 (LineEdit 높이만 늘려도 라벨/행이 빽빽하면 답답해 보임)
+        layout_info.setRowMinimumHeight(0, 34)
+        layout_info.setRowMinimumHeight(1, 34)
+        layout_info.setRowMinimumHeight(2, 34)
+
         self.le_customer = QtWidgets.QLineEdit()
         self.le_customer.setPlaceholderText("예: 셀릭스, 전라제주시설단 등")
+        self.le_customer.setMinimumHeight(32)
 
         self.date_supply = QtWidgets.QDateEdit()
         self.date_supply.setDisplayFormat("yyyy-MM-dd")
         self.date_supply.setCalendarPopup(True)
         self.date_supply.setDate(QtCore.QDate.currentDate())
+        self.date_supply.setMinimumHeight(32)
 
         self.le_bizno = QtWidgets.QLineEdit("849-63-00642")
+        self.le_bizno.setMinimumHeight(32)
+
         self.le_contact = QtWidgets.QLineEdit("010-4874-8419")
+        self.le_contact.setMinimumHeight(32)
 
         self.le_vat = QtWidgets.QLineEdit("10")
+        self.le_vat.setMinimumHeight(32)
 
-        layout_info.addWidget(QtWidgets.QLabel("거래처명"), 0, 0)
+        layout_info.addWidget(_mk_label("거래처명"), 0, 0)
         layout_info.addWidget(self.le_customer, 0, 1, 1, 3)
 
-        layout_info.addWidget(QtWidgets.QLabel("공급일자"), 1, 0)
+        layout_info.addWidget(_mk_label("공급일자"), 1, 0)
         layout_info.addWidget(self.date_supply, 1, 1)
 
-        layout_info.addWidget(QtWidgets.QLabel("사업자등록번호"), 1, 2)
+        layout_info.addWidget(_mk_label("사업자번호"), 1, 2)
         layout_info.addWidget(self.le_bizno, 1, 3)
 
-        layout_info.addWidget(QtWidgets.QLabel("연락처"), 2, 0)
+        layout_info.addWidget(_mk_label("연락처"), 2, 0)
         layout_info.addWidget(self.le_contact, 2, 1)
 
-        layout_info.addWidget(QtWidgets.QLabel("부가세율(%)"), 2, 2)
+        layout_info.addWidget(_mk_label("부가세율(%)"), 2, 2)
         layout_info.addWidget(self.le_vat, 2, 3)
 
-        main_layout.addWidget(grp_info)
+        top_lay.addWidget(grp_info)
 
-        # ------------------------------------------------------------------
-        # ① 고객 요청 총액 기준 계산 (화면용)
-        # ------------------------------------------------------------------
+        # --------------------------
+        # 총액 기준 계산 (기존 유지)
+        # --------------------------
         grp_total = QtWidgets.QGroupBox("① 고객 요청 총액 기준 계산 (화면용)")
+        grp_total.setProperty("card", True)
+
         layout_total = QtWidgets.QGridLayout(grp_total)
+        layout_total.setContentsMargins(10, 10, 10, 10)
+        layout_total.setHorizontalSpacing(10)
+        layout_total.setVerticalSpacing(8)
+        layout_total.setColumnStretch(1, 1)
+        layout_total.setColumnStretch(3, 1)
 
         self.le_total_amount = QtWidgets.QLineEdit()
         self.le_total_amount.setPlaceholderText("예: 200000 (부가세 포함 총액)")
+        self.le_total_amount.setMinimumHeight(30)
 
         self.le_total_qty = QtWidgets.QLineEdit()
         self.le_total_qty.setPlaceholderText("예: 8 (총 수량)")
+        self.le_total_qty.setMinimumHeight(30)
 
         self.le_total_vat = QtWidgets.QLineEdit()
         self.le_total_vat.setPlaceholderText("기본은 위의 부가세율 사용")
+        self.le_total_vat.setMinimumHeight(30)
 
         self.btn_total_calc = QtWidgets.QPushButton("계산하기")
+        self.btn_total_calc.setProperty("accent", True)
+        self.btn_total_calc.setMinimumHeight(32)
 
-        layout_total.addWidget(QtWidgets.QLabel("총 금액(부가세 포함)"), 0, 0)
+        layout_total.addWidget(_mk_label("총 금액"), 0, 0)
         layout_total.addWidget(self.le_total_amount, 0, 1)
 
-        layout_total.addWidget(QtWidgets.QLabel("총 수량"), 0, 2)
+        layout_total.addWidget(_mk_label("총 수량"), 0, 2)
         layout_total.addWidget(self.le_total_qty, 0, 3)
 
-        layout_total.addWidget(QtWidgets.QLabel("부가세율(%)"), 1, 0)
+        layout_total.addWidget(_mk_label("부가세율(%)"), 1, 0)
         layout_total.addWidget(self.le_total_vat, 1, 1)
         layout_total.addWidget(self.btn_total_calc, 1, 3)
 
-        self.lbl_total_result = QtWidgets.QLabel(
-            "⇒ 총액/수량 기준으로 계산된 단가·공급가액·세액·합계를 여기 표시합니다."
-        )
-        self.lbl_total_result.setStyleSheet("color: #444;")
+        self.lbl_total_result = QtWidgets.QLabel("⇒ 계산 결과가 여기에 표시됩니다.")
+        self.lbl_total_result.setWordWrap(True)
+        self.lbl_total_result.setProperty("muted", True)
         layout_total.addWidget(self.lbl_total_result, 2, 0, 1, 4)
 
         self.btn_total_calc.clicked.connect(self.on_total_calc)
 
-        main_layout.addWidget(grp_total)
+        top_lay.addWidget(grp_total)
 
-        # ------------------------------------------------------------------
-        # 엑셀 템플릿 경로  (절대 경로 고정)
-        # ------------------------------------------------------------------
+        # --------------------------
+        # 템플릿 (기존 유지)
+        # --------------------------
         grp_tpl = QtWidgets.QGroupBox("엑셀 템플릿 파일 (기존 양식)")
-        layout_tpl = QtWidgets.QGridLayout(grp_tpl)
+        grp_tpl.setProperty("card", True)
+        grp_tpl.setMaximumHeight(140)
 
-        # 절대 경로 고정
-        self.TEMPLATE_DIR = Path(r"C:\my_games\excel_cal\ex")
+        layout_tpl = QtWidgets.QGridLayout(grp_tpl)
+        layout_tpl.setContentsMargins(10, 10, 10, 10)
+        layout_tpl.setHorizontalSpacing(10)
+        layout_tpl.setVerticalSpacing(8)
+        layout_tpl.setColumnStretch(1, 1)
+
+        self.TEMPLATE_DIR = base_dir / "ex"
 
         def make_tpl_row(row: int, label_text: str, filename: str):
-            label_widget = QtWidgets.QLabel(label_text)
-
-            # 항상 C:\my_games\excel_cal\ex\ 아래 파일을 기본값으로 사용
+            lb = _mk_label(label_text, 110)
             abs_path = self.TEMPLATE_DIR / filename
             line_edit = QtWidgets.QLineEdit(str(abs_path))
+            line_edit.setMinimumHeight(30)
 
             btn = QtWidgets.QPushButton("찾기...")
+            btn.setProperty("ghost", True)
+            btn.setMinimumHeight(30)
 
             def browse():
-                # 필요하면 다른 위치의 템플릿을 쓸 수 있도록 탐색은 그대로 둠
                 path, _ = QtWidgets.QFileDialog.getOpenFileName(
                     self,
                     f"{label_text} 템플릿 선택",
@@ -161,37 +226,63 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
 
             btn.clicked.connect(browse)
 
-            layout_tpl.addWidget(label_widget, row, 0)
+            layout_tpl.addWidget(lb, row, 0)
             layout_tpl.addWidget(line_edit, row, 1)
             layout_tpl.addWidget(btn, row, 2)
             return line_edit
 
-        # 여기서 파일명만 넘기면 위에서 절대경로로 붙인다.
-        self.le_tpl_quote = make_tpl_row(0, "견적서 템플릿", "견적서.xlsx")
-        self.le_tpl_delivery = make_tpl_row(1, "납품서 템플릿", "납품서.xlsx")
-        self.le_tpl_statement = make_tpl_row(2, "거래명세표 템플릿", "거래명세표.xlsx")
+        self.le_tpl_quote = make_tpl_row(0, "견적서", "견적서.xlsx")
+        self.le_tpl_delivery = make_tpl_row(1, "납품서", "납품서.xlsx")
+        self.le_tpl_statement = make_tpl_row(2, "거래명세표", "거래명세표.xlsx")
 
-        main_layout.addWidget(grp_tpl)
+        top_lay.addWidget(grp_tpl)
+        top_lay.addStretch(1)
 
-        # ------------------------------------------------------------------
-        # ② 품목별 정가 & 임의 할인율 기준 계산
-        # ------------------------------------------------------------------
+        # --------------------------
+        # 하단: 품목 테이블 크게 (기존 유지)
+        # --------------------------
         grp_items = QtWidgets.QGroupBox("② 품목별 정가 & 임의 할인율 기준 계산 (엑셀 내보내기용)")
+        grp_items.setProperty("card", True)
         vbox_items = QtWidgets.QVBoxLayout(grp_items)
+        vbox_items.setContentsMargins(10, 10, 10, 10)
+        vbox_items.setSpacing(8)
 
         self.table = QtWidgets.QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
             ["품목명", "규격", "수량", "정가 단가(부가세 포함)", "할인율(%)"]
         )
-        self.table.horizontalHeader().setSectionResizeMode(QtWidgets.QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setAlternatingRowColors(True)
-        vbox_items.addWidget(self.table)
+        self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
+        self.table.setEditTriggers(
+            QtWidgets.QAbstractItemView.DoubleClicked | QtWidgets.QAbstractItemView.EditKeyPressed
+        )
+        self.table.setMinimumHeight(360)
+
+        header = self.table.horizontalHeader()
+        header.setDefaultAlignment(QtCore.Qt.AlignVCenter | QtCore.Qt.AlignLeft)
+
+        header.setSectionResizeMode(0, QtWidgets.QHeaderView.Interactive)  # 품목명
+        header.setSectionResizeMode(1, QtWidgets.QHeaderView.Interactive)  # 규격
+        header.setSectionResizeMode(2, QtWidgets.QHeaderView.ResizeToContents)  # 수량
+        header.setSectionResizeMode(3, QtWidgets.QHeaderView.Interactive)  # 정가
+        header.setSectionResizeMode(4, QtWidgets.QHeaderView.ResizeToContents)  # 할인율
+
+        self.table.setColumnWidth(0, 220)
+        self.table.setColumnWidth(1, 170)
+        self.table.setColumnWidth(2, 80)
+        self.table.setColumnWidth(3, 240)
+        self.table.setColumnWidth(4, 110)
+
+        self.table.setRowCount(0)
+        vbox_items.addWidget(self.table, 1)
 
         btn_row_layout = QtWidgets.QHBoxLayout()
         btn_add = QtWidgets.QPushButton("행 추가")
         btn_del = QtWidgets.QPushButton("선택 행 삭제")
         btn_cal_items = QtWidgets.QPushButton("품목 계산하기")
+        btn_cal_items.setProperty("accent", True)
+
         btn_row_layout.addWidget(btn_add)
         btn_row_layout.addWidget(btn_del)
         btn_row_layout.addWidget(btn_cal_items)
@@ -202,22 +293,25 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         btn_del.clicked.connect(self.delete_selected_rows)
         btn_cal_items.clicked.connect(self.on_calc_items)
 
-        # 품목 합계 표시
         summary_layout = QtWidgets.QHBoxLayout()
         self.lbl_sum_supply = QtWidgets.QLabel("공급가 합계: -")
         self.lbl_sum_vat = QtWidgets.QLabel("부가세 합계: -")
         self.lbl_sum_gross = QtWidgets.QLabel("합계(부가세 포함): -")
         for lbl in (self.lbl_sum_supply, self.lbl_sum_vat, self.lbl_sum_gross):
-            lbl.setStyleSheet("font-weight: bold;")
+            lbl.setProperty("sum", True)
             summary_layout.addWidget(lbl)
         summary_layout.addStretch(1)
         vbox_items.addLayout(summary_layout)
 
-        main_layout.addWidget(grp_items, 1)
+        splitter.addWidget(grp_items)
 
-        # ------------------------------------------------------------------
-        # 실행 버튼들
-        # ------------------------------------------------------------------
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([240, 560])
+
+        # --------------------------
+        # 맨 아래 실행 버튼 줄 (기존 유지)
+        # --------------------------
         bottom_layout = QtWidgets.QHBoxLayout()
         self.btn_naver = QtWidgets.QPushButton("네이버 송장")
         self.btn_coopang = QtWidgets.QPushButton("쿠팡 송장")
@@ -225,6 +319,8 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         self.btn_make_quote = QtWidgets.QPushButton("견적서만 생성")
         self.btn_make_delivery = QtWidgets.QPushButton("납품서만 생성")
         self.btn_make_statement = QtWidgets.QPushButton("거래명세표만 생성")
+        self.btn_make_all.setProperty("accent", True)
+
         bottom_layout.addWidget(self.btn_naver)
         bottom_layout.addWidget(self.btn_coopang)
         bottom_layout.addWidget(self.btn_make_all)
@@ -232,8 +328,7 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         bottom_layout.addWidget(self.btn_make_delivery)
         bottom_layout.addWidget(self.btn_make_statement)
         bottom_layout.addStretch(1)
-
-        main_layout.addLayout(bottom_layout)
+        root.addLayout(bottom_layout)
 
         self.status = self.statusBar()
 
@@ -244,8 +339,7 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         self.btn_make_delivery.clicked.connect(self.on_make_delivery)
         self.btn_make_statement.clicked.connect(self.on_make_statement)
 
-        # [수정] 강제로 0줄로 초기화 후 1줄 추가 (무조건 1줄 시작)
-        self.table.setRowCount(0)
+        # 시작은 1줄
         self.add_row()
 
     # ------------------------------------------------------------------
@@ -1340,6 +1434,7 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
                     df_list.append(df)
 
         return df
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)

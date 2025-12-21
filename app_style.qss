@@ -1,0 +1,160 @@
+/* =========================================================
+   공통 (RESET + 기본 가독성)
+   ========================================================= */
+
+* {
+    font-family: "맑은 고딕";
+    font-size: 13px;
+    color: #3a2f2f;
+}
+
+QMainWindow {
+    background: #fffafa;
+}
+
+/* 입력 위젯 */
+QLineEdit, QDateEdit {
+    background: #ffffff;
+    border: 1px solid #e5bfc6;
+    border-radius: 10px;
+
+    /* ✅ 내부 패딩(글자/테두리 간격) */
+    padding: 8px 12px;
+    min-height: 34px;
+
+    /* ✅ 레이아웃 셀 사이가 붙어 보이는 현상 방지 */
+    margin: 2px;
+}
+
+/* ✅ QDateEdit은 우측 드롭다운 영역 때문에 경계가 겹쳐 보일 수 있어 우측 패딩 확보 */
+QDateEdit {
+    padding-right: 34px;
+}
+
+QDateEdit::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 28px;
+    border-left: 1px solid #e5bfc6;
+}
+
+
+
+QLineEdit:focus, QDateEdit:focus {
+    border: 1px solid #d98c9b;
+}
+
+/* 버튼 기본 */
+QPushButton {
+    background: #ffffff;
+    border: 1px solid #d9a3ad;
+    border-radius: 16px;
+    padding: 6px 14px;
+}
+
+QPushButton:hover {
+    background: #fdecef;
+}
+
+/* 강조 버튼 */
+QPushButton[accent="true"] {
+    background: #e7a1b0;
+    color: white;
+    border: none;
+}
+
+QPushButton[accent="true"]:hover {
+    background: #dc8c9c;
+}
+
+/* =========================================================
+   GroupBox (제목 잘림 문제 해결 핵심)
+   ========================================================= */
+
+QGroupBox {
+    border: 1px solid #e5bfc6;
+    border-radius: 14px;
+    margin-top: 26px;            /* 🔥 제목 공간 확보 */
+    background: #fffdfd;
+}
+
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+
+    padding: 4px 12px;           /* 🔥 제목 안쪽 여백 */
+    margin-left: 12px;
+
+    font-weight: bold;
+    font-size: 13px;
+
+    background: #f6c9d2;
+    color: #5a2a33;
+    border-radius: 8px;
+}
+
+/* =========================================================
+   설명/결과 텍스트
+   ========================================================= */
+
+QLabel[muted="true"] {
+    color: #8a6a70;
+}
+
+/* 합계 표시 (아래 잘 안 보이던 부분) */
+QLabel[sum="true"] {
+    background: #f6c9d2;
+    color: #5a2a33;
+    font-weight: bold;
+    padding: 6px 12px;
+    border-radius: 12px;
+}
+
+/* =========================================================
+   테이블
+   ========================================================= */
+
+QTableWidget {
+    background: white;
+    border: 1px solid #e5bfc6;
+    border-radius: 12px;
+}
+
+QHeaderView::section {
+    background: #fdecef;
+    border: none;
+    padding: 6px;
+    font-weight: bold;
+}
+
+/* =========================================================
+   탭 위젯
+   ========================================================= */
+
+QTabWidget::pane {
+    border: none;
+}
+
+/* 기본 탭 */
+QTabBar::tab {
+    background: #f7f7f7;
+    border: 1px solid #ddd;
+    border-bottom: none;
+    padding: 10px 22px;
+    border-top-left-radius: 14px;
+    border-top-right-radius: 14px;
+    margin-right: 6px;
+}
+
+/* 선택된 탭 */
+QTabBar::tab:selected {
+    background: #f6c9d2;
+    color: #5a2a33;
+    font-weight: bold;
+}
+
+/* =========================================================
+   첫 번째 탭 (핑크 컨셉) – 여기까지만 적용
+   ========================================================= */
+
+/* 👉 두 번째 ~ 네 번째 탭은 다음 단계에서 분리 적용 */
