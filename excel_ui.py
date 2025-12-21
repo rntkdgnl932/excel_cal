@@ -17,44 +17,65 @@ class UpdateWidget(QtWidgets.QWidget):
     Git 저장소 기준으로 현재 githash 확인 + git pull 실행하는 탭.
     - repo_root 아래/상위에 .git 폴더가 있어야 정상 동작
     """
+
     def __init__(self, repo_root: Path, parent=None):
         super().__init__(parent)
         self.repo_root = repo_root
 
         main_layout = QtWidgets.QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(14, 14, 14, 14)
+        main_layout.setSpacing(10)
 
-        # 상단 설명 및 경로 / 해시 표시
+        # -------------------------
+        # 상단 타이틀/정보
+        # -------------------------
         lbl_title = QtWidgets.QLabel("엑셀 도구 Git 업데이트")
-        lbl_title.setStyleSheet("font-weight: bold; font-size: 14px;")
+        lbl_title.setObjectName("updateTitle")  # ✅ QSS 타겟
         main_layout.addWidget(lbl_title)
 
         self.lbl_repo = QtWidgets.QLabel(f"저장소 경로: {str(self.repo_root)}")
+        self.lbl_repo.setObjectName("updateRepo")  # ✅ QSS 타겟
         main_layout.addWidget(self.lbl_repo)
 
         self.lbl_hash = QtWidgets.QLabel("현재 githash: (알 수 없음)")
+        self.lbl_hash.setObjectName("updateHash")  # ✅ QSS 타겟
         main_layout.addWidget(self.lbl_hash)
 
+        # (선택) 정보 영역과 버튼 사이 여백
+        main_layout.addSpacing(4)
+
+        # -------------------------
         # 버튼 영역
+        # -------------------------
         btn_layout = QtWidgets.QHBoxLayout()
+        btn_layout.setSpacing(10)
+
         self.btn_refresh = QtWidgets.QPushButton("상태 새로고침 (해시/상태)")
+        self.btn_refresh.setObjectName("btnUpdateRefresh")  # ✅ QSS 타겟
+
         self.btn_pull = QtWidgets.QPushButton("업데이트 실행 (git pull)")
-        btn_layout.addWidget(self.btn_refresh)
-        btn_layout.addWidget(self.btn_pull)
+        self.btn_pull.setObjectName("btnUpdatePull")  # ✅ QSS 타겟
+        self.btn_pull.setProperty("accent", True)  # ✅ QSS에서 강조 버튼 처리
+
+        btn_layout.addWidget(self.btn_refresh, 0)
+        btn_layout.addWidget(self.btn_pull, 0)
         btn_layout.addStretch(1)
         main_layout.addLayout(btn_layout)
 
+        # -------------------------
         # 로그 영역
+        # -------------------------
         self.log = QtWidgets.QPlainTextEdit()
+        self.log.setObjectName("updateLog")  # ✅ QSS 타겟
         self.log.setReadOnly(True)
-        self.log.setMinimumHeight(250)
+        self.log.setMinimumHeight(260)
         main_layout.addWidget(self.log, 1)
 
+        # -------------------------
         # 시그널 연결
+        # -------------------------
         self.btn_refresh.clicked.connect(self.on_refresh_clicked)
         self.btn_pull.clicked.connect(self.on_pull_clicked)
-
 
     # ---------------------------
     # 내부 유틸: 로그/경로/실행
@@ -208,22 +229,24 @@ class MainTabbedWindow(QtWidgets.QMainWindow):
                 app.setFont(f)
 
         # 1. 기존 부가세/3종 엑셀 생성기 탭
-        self.cal_window = ExcelCalWindow()
+        self.cal_window = ExcelCalWindow(self)
+        self.cal_window.setObjectName("tab_pink")  # ✅ 추가
         tabs.addTab(self.cal_window, "부가세 계산 / 3종 엑셀")
 
         # 2. 네이버/쿠팡 송장 엑셀 읽기 탭
         self.read_invoice_widget = ReadInvoiceWidget(self)
-        self.read_invoice_widget.setObjectName("tab_dark")  # ✅ QSS 타겟
+        self.read_invoice_widget.setObjectName("tab_dark")
         tabs.addTab(self.read_invoice_widget, "네이버·쿠팡 송장 엑셀 읽기")
 
         # 3. 스케쥴 탭
         self.schedule_widget = ScheduleWidget(self)
-        self.schedule_widget.setObjectName("tab_blue")  # ✅ 3탭 전용 QSS 타겟
+        self.schedule_widget.setObjectName("tab_blue")
         tabs.addTab(self.schedule_widget, "스케쥴")
 
         # 4. Git 업데이트 탭
-        base_dir = Path(__file__).resolve().parent  # 보통 C:\my_games\excel_cal
+        base_dir = Path(__file__).resolve().parent
         self.update_widget = UpdateWidget(base_dir, self)
+        self.update_widget.setObjectName("tab_orange")  # ✅ 추가
         tabs.addTab(self.update_widget, "업데이트 (git pull)")
 
         # --------------------------

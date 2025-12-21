@@ -9,7 +9,7 @@
 
 
 /* =========================================================
-   1. 공통 / 배경 / 타이포
+   1. 공통 / 배경 / 타이포 / 탭 색상
    ========================================================= */
 
 * {
@@ -33,6 +33,12 @@ QAbstractScrollArea {
 QAbstractScrollArea::viewport {
     background: #f5f6f8;
 }
+
+QWidget#tab_pink   { background-color: #fff3f7; }
+QWidget#tab_dark   { background-color: #1f2329; }
+QWidget#tab_blue   { background-color: #f3f7ff; }
+QWidget#tab_orange { background-color: #fbf7f3; }
+
 
 
 /* =========================================================
@@ -592,3 +598,80 @@ QWidget#tab_blue #weekdayWeek { color: #111827; font-weight: 800; }
 QWidget#tab_blue QScrollBar::handle:vertical { background: #9cc7ff; }
 QWidget#tab_blue QScrollBar::handle:vertical:hover { background: #7fb3ff; }
 
+/* =========================================================
+   TAB 4 – ORANGE / AMBER (UpdateWidget 전용)
+   적용 조건: 업데이트 탭 위젯 objectName == tab_orange
+   ========================================================= */
+
+QWidget#tab_orange {
+    background: #fbf7f3;
+    color: #1f2328;
+}
+
+/* 타이틀 */
+QWidget#tab_orange QLabel#updateTitle {
+    font-size: 12pt;
+    font-weight: 900;
+    color: #2b2f36;
+    padding: 4px 2px;
+}
+
+/* 정보 라벨 */
+QWidget#tab_orange QLabel#updateRepo,
+QWidget#tab_orange QLabel#updateHash {
+    color: #384150;
+    font-weight: 600;
+    padding: 1px 2px;
+}
+
+/* 버튼 공통 */
+QWidget#tab_orange QPushButton#btnUpdateRefresh,
+QWidget#tab_orange QPushButton#btnUpdatePull {
+    min-height: 34px;
+    padding: 7px 14px;
+    border-radius: 12px;
+    font-weight: 900;
+}
+
+/* 새로고침(서브) */
+QWidget#tab_orange QPushButton#btnUpdateRefresh {
+    background: #ffffff;
+    border: 1px solid #e6e8ef;
+    color: #2b2f36;
+}
+QWidget#tab_orange QPushButton#btnUpdateRefresh:hover {
+    background: #fff4ec;
+    border-color: #ffd2b3;
+}
+QWidget#tab_orange QPushButton#btnUpdateRefresh:pressed {
+    background: #ffe8d7;
+}
+
+/* 업데이트 실행(메인 강조) */
+QWidget#tab_orange QPushButton#btnUpdatePull {
+    background: #ff9a57;
+    border: 1px solid #ff9a57;
+    color: #ffffff;
+}
+QWidget#tab_orange QPushButton#btnUpdatePull:hover {
+    background: #ff8a3d;
+    border-color: #ff8a3d;
+}
+QWidget#tab_orange QPushButton#btnUpdatePull:pressed {
+    background: #f37c2a;
+    border-color: #f37c2a;
+}
+
+/* 로그: 카드형 */
+QWidget#tab_orange QPlainTextEdit#updateLog {
+    background: #ffffff;
+    border: 1px solid #ffd2b3;
+    border-bottom: 3px solid #f2b48a;  /* fake shadow */
+    border-radius: 14px;
+    padding: 10px 12px;
+    color: #1f2328;
+}
+QWidget#tab_orange QPlainTextEdit#updateLog:focus {
+    border-color: #ff9a57;
+    background: #fffaf5;
+}

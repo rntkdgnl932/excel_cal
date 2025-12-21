@@ -742,6 +742,17 @@ class ScheduleWidget(QtWidgets.QWidget):
         all_layout.setContentsMargins(8, 10, 8, 8)
         all_layout.setSpacing(8)
 
+        self.cb_filter = QtWidgets.QComboBox()
+        self.cb_filter.addItems(["전체", "진행중", "완료"])
+
+        # 1번 인덱스("진행중")를 기본 선택으로 설정
+        self.cb_filter.setCurrentIndex(1)
+
+        # 변경 시 갱신 연결
+        self.cb_filter.currentIndexChanged.connect(self._refresh_all_list)
+
+        all_layout.addWidget(self.cb_filter)
+
         self.all_list = QtWidgets.QListWidget()
         self.all_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.all_list.setVerticalScrollMode(QtWidgets.QAbstractItemView.ScrollPerPixel)
@@ -817,10 +828,24 @@ class ScheduleWidget(QtWidgets.QWidget):
 
     # ---------- Calendar data ----------
     def _get_items_for_date_for_calendar(self, date_str: str) -> List[ScheduleItem]:
-        # 달력 셀 내부 표시용: 정렬(미완료 우선 -> 최신)
+        """
+        [수정됨] 달력 셀 내부 표시용 데이터 가져오기
+        1순위: 완료 여부 (진행중이 위, 완료된 건 아래로)
+        2순위: 최신 수정/생성 순
+        """
         items = self.store.list_by_date(date_str)
-        # 미완료 먼저
-        items = sorted(items, key=lambda x: (x.completed, -(datetime.fromisoformat(x.updated_at or x.created_at).timestamp() if (x.updated_at or x.created_at) else 0)))
+
+        # 정렬 키:
+        # x.completed가 False(0)이면 앞쪽, True(1)이면 뒤쪽 -> 완료된 게 아래로 감
+        # 그 다음엔 최신순 정렬
+        items = sorted(
+            items,
+            key=lambda x: (
+                x.completed,
+                -(datetime.fromisoformat(x.updated_at or x.created_at).timestamp() if (
+                            x.updated_at or x.created_at) else 0)
+            )
+        )
         return items
 
     def _refresh_calendar_view(self) -> None:
@@ -951,21 +976,50 @@ class ScheduleWidget(QtWidgets.QWidget):
             self.day_list.addItem(li)
 
     def _refresh_all_list(self) -> None:
+        """
+        [수정됨] 콤보박스(전체/진행중/완료) 조건에 맞춰 리스트 필터링
+        """
         self.all_list.clear()
-        items = self.store.list_all_sorted()
-        if not items:
-            x = QtWidgets.QListWidgetItem("전체 스케쥴 없음")
-            x.setFlags(QtCore.Qt.NoItemFlags)
-            self.all_list.addItem(x)
-            self.detail.setPlainText("")
-            return
 
+        # 1. 저장된 모든 스케쥴 가져오기
+        items = self.store.list_all_sorted()
+
+        # 2. 현재 선택된 필터 확인 (전체 / 진행중 / 완료)
+        #    (__init__이 덜 끝나서 cb_filter가 없을 때를 대비해 예외처리)
+        try:
+            filter_mode = self.cb_filter.currentText()
+        except AttributeError:
+            filter_mode = "전체"
+
+        # 3. 하나씩 검사해서 리스트에 추가
+        count = 0
         for it in items:
+            # 필터링 로직
+            if filter_mode == "진행중" and it.completed:
+                continue  # 완료된 건 건너뜀
+            if filter_mode == "완료" and not it.completed:
+                continue  # 미완료된 건 건너뜀
+
+            # (전체이거나, 조건에 맞는 경우만 여기까지 옴)
             prefix = "(완료) " if it.completed else ""
             li = QtWidgets.QListWidgetItem(f"{it.date} | {prefix}{it.title}")
             li.setData(QtCore.Qt.UserRole, it.id)
             self._apply_completed_style(li, it.completed)
             self.all_list.addItem(li)
+            count += 1
+
+        # 4. 표시할 게 없을 때 안내 문구
+        if count == 0:
+            msg = "스케쥴 없음"
+            if filter_mode == "진행중":
+                msg = "진행중인 스케쥴 없음"
+            elif filter_mode == "완료":
+                msg = "완료된 스케쥴 없음"
+
+            x = QtWidgets.QListWidgetItem(msg)
+            x.setFlags(QtCore.Qt.NoItemFlags)
+            self.all_list.addItem(x)
+            self.detail.setPlainText("")
 
     def _select_first_item_if_any(self) -> None:
         if self.all_list.count() <= 0:
