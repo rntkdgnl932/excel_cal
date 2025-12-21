@@ -109,7 +109,7 @@ class GoogleCalendarSync:
 
         # ✅ 중요: 여기서 run_local_server를 써야 redirect_uri 오류가 안 납니다.
         flow = InstalledAppFlow.from_client_secrets_file(str(self.client_secret_path), SCOPES)
-        creds = flow.run_local_server(port=0)
+        creds = flow.run_local_server(port=8080)
 
         self.token_path.write_text(creds.to_json(), encoding="utf-8")
 
