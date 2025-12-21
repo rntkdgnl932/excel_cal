@@ -404,6 +404,15 @@ class ReadInvoiceWidget(QWidget):
         self.btn_complete.clicked.connect(self.on_click_complete)
         main_layout.addWidget(self.btn_complete)
 
+        # ============================================================
+        # [추가됨] 문자 전송 패널 토글 버튼
+        # ============================================================
+        self.btn_toggle_sms = QPushButton("💬 문자 전송 패널 열기 (클릭)")
+        self.btn_toggle_sms.setFixedHeight(30)
+        self.btn_toggle_sms.clicked.connect(self.on_toggle_sms)
+        main_layout.addWidget(self.btn_toggle_sms)
+        # ============================================================
+
         # -------------------------
         # 문자 전송 패널 (ship_sms)
         # -------------------------
@@ -427,14 +436,18 @@ class ReadInvoiceWidget(QWidget):
     # 문자 전송 UI
     # ------------------------------------------------------------------
     def _build_sms_panel(self, parent_layout: QVBoxLayout):
-        grp = QGroupBox("문자 전송")
-        grp.setObjectName("ship_sms")
+        self.grp_sms = QGroupBox("문자 전송")
+        self.grp_sms.setObjectName("ship_sms")
+        self.grp_sms.setMaximumHeight(220)
 
-        grp.setMaximumHeight(220)
+        # [핵심] 기본적으로 숨김 처리 (엑셀 넓게 보기 위해)
+        self.grp_sms.setVisible(False)
 
-        layout = QHBoxLayout(grp)
+        layout = QHBoxLayout(self.grp_sms)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(12)
+
+        grp = self.grp_sms
 
         # 왼쪽: 선택 고객 정보
         left_box = QVBoxLayout()
@@ -493,6 +506,20 @@ class ReadInvoiceWidget(QWidget):
 
         self.btn_send_selected.clicked.connect(self.on_send_selected)
         self.btn_send_all.clicked.connect(self.on_send_all)
+
+    # [추가 위치: ReadInvoiceWidget 클래스 내부 아무데나]
+    def on_toggle_sms(self):
+        # 현재 보이는 상태인지 확인
+        is_visible = self.grp_sms.isVisible()
+
+        # 반대로 설정 (보이면 숨기고, 숨겨져 있으면 보이고)
+        self.grp_sms.setVisible(not is_visible)
+
+        # 버튼 글자도 상태에 맞춰 변경
+        if not is_visible:
+            self.btn_toggle_sms.setText("💬 문자 전송 패널 닫기 (숨기기)")
+        else:
+            self.btn_toggle_sms.setText("💬 문자 전송 패널 열기 (클릭)")
 
     def _on_send_now_toggled(self, checked: bool):
         self.dt_send.setEnabled(not checked)
