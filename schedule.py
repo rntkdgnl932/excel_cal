@@ -1570,39 +1570,89 @@ def run_job_with_progress_async(
                 pass
         return
 
+
 def _mk_progress(owner: QtWidgets.QWidget, title: str, tail_file=None):
     """
-    run_job_with_progress_async()가 기대하는 형태로
-    (on_progress_ui, finalize_ui, dlg)를 만들어 반환한다.
+    [수정됨] 예쁜 UI + 로딩바 + 성공 시 1초 뒤 자동 닫힘
     """
     dlg = QtWidgets.QDialog(owner)
     dlg.setWindowTitle(title)
-    dlg.setModal(False)
-    dlg.resize(640, 420)
+    dlg.setModal(True)  # 작업 중 다른거 못 만지게 (선택사항)
+    dlg.resize(500, 320)
 
-    v = QtWidgets.QVBoxLayout(dlg)
-    v.setContentsMargins(10, 10, 10, 10)
-    v.setSpacing(8)
+    # 창 상단 ? 버튼 제거
+    dlg.setWindowFlags(dlg.windowFlags() & ~QtCore.Qt.WindowContextHelpButtonHint)
 
+    # ✅ 스타일시트 (깔끔한 디자인)
+    dlg.setStyleSheet("""
+        QDialog {
+            background-color: #ffffff;
+        }
+        QLabel#TitleLabel {
+            font-size: 15px;
+            font-weight: bold;
+            color: #333333;
+        }
+        QProgressBar {
+            border: none;
+            background-color: #f1f3f5;
+            border-radius: 4px;
+            height: 6px;
+        }
+        QProgressBar::chunk {
+            background-color: #74c0fc;  /* 파란색 로딩 */
+            border-radius: 4px;
+        }
+        QPlainTextEdit {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 10px;
+            font-family: '맑은 고딕', sans-serif;
+            font-size: 12px;
+            color: #555555;
+        }
+        QPushButton {
+            background-color: #ff6b6b;
+            color: white;
+            border-radius: 6px;
+            padding: 6px 14px;
+            font-weight: bold;
+        }
+        QPushButton:hover {
+            background-color: #fa5252;
+        }
+    """)
+
+    layout = QtWidgets.QVBoxLayout(dlg)
+    layout.setContentsMargins(20, 20, 20, 20)
+    layout.setSpacing(12)
+
+    # 1. 제목
     lbl = QtWidgets.QLabel(title)
-    f = lbl.font()
-    f.setBold(True)
-    lbl.setFont(f)
-    v.addWidget(lbl)
+    lbl.setObjectName("TitleLabel")
+    layout.addWidget(lbl)
 
+    # 2. 로딩바 (왔다갔다 하는 애니메이션)
+    pbar = QtWidgets.QProgressBar()
+    pbar.setRange(0, 0)  # 시작/끝 모름 -> 무한 로딩 애니메이션
+    pbar.setTextVisible(False)
+    layout.addWidget(pbar)
+
+    # 3. 로그 창
     log = QtWidgets.QPlainTextEdit()
     log.setReadOnly(True)
-    log.setLineWrapMode(QtWidgets.QPlainTextEdit.NoWrap)
-    v.addWidget(log, 1)
+    layout.addWidget(log, 1)
 
-    row = QtWidgets.QHBoxLayout()
-    v.addLayout(row)
-
+    # 4. 닫기 버튼 (에러 났을 때만 보임)
+    btn_area = QtWidgets.QHBoxLayout()
     btn_close = QtWidgets.QPushButton("닫기")
-    btn_close.setEnabled(False)
-    row.addStretch(1)
-    row.addWidget(btn_close)
+    btn_close.setVisible(False)  # 평소엔 숨김
+    btn_area.addStretch(1)
+    btn_area.addWidget(btn_close)
+    layout.addLayout(btn_area)
 
+    # ----------- 내부 함수들 -----------
     def _append(line: str):
         try:
             log.appendPlainText(line)
@@ -1610,24 +1660,34 @@ def _mk_progress(owner: QtWidgets.QWidget, title: str, tail_file=None):
             pass
 
     def on_progress_ui(info: dict):
-        # info: {"stage": "...", "msg": "..."} 형태를 기대
         if not isinstance(info, dict):
             _append(str(info))
             return
         msg = info.get("msg")
         if msg:
             _append(str(msg))
-        else:
-            _append(str(info))
 
     def finalize_ui(ok: bool, payload, err):
-        if ok:
-            _append("[ui] 작업 완료")
-        else:
-            _append(f"[ui] 작업 실패: {err}")
-        btn_close.setEnabled(True)
+        # 로딩바 멈춤
+        pbar.setRange(0, 100)
 
-    btn_close.clicked.connect(dlg.close)
+        if ok:
+            pbar.setValue(100)  # 꽉 채움
+            pbar.setStyleSheet("QProgressBar::chunk { background-color: #a9e34b; }")  # 성공 시 연두색
+            _append("\n[성공] 모든 작업이 완료되었습니다.")
+            _append("잠시 후 창이 닫힙니다...")
+
+            # ✅ [핵심] 1초(1000ms) 뒤 자동 닫기
+            QtCore.QTimer.singleShot(1000, dlg.accept)
+        else:
+            pbar.setValue(150)
+            pbar.setStyleSheet("QProgressBar::chunk { background-color: #ff6b6b; }")  # 실패 시 빨간색
+            _append(f"\n[오류] 작업 중 문제가 발생했습니다.\n{err}")
+
+            # 에러나면 닫기 버튼 보여주고 자동 닫기 안 함 (읽어봐야 하니까)
+            btn_close.setVisible(True)
+
+    btn_close.clicked.connect(dlg.reject)
 
     dlg.show()
     return on_progress_ui, finalize_ui, dlg
