@@ -608,12 +608,12 @@ class ReadInvoiceWidget(QWidget):
         # -------------------------
         # [추가] 대시보드용 변수 및 타이머
         # -------------------------
-        self._start_time = None  # 엑셀 불러온 시간
+        self._start_time = None
         self._dashboard_timer = QTimer(self)
-        self._dashboard_timer.setInterval(1000)  # 1초(1000ms)마다 갱신
-        self._dashboard_timer.timeout.connect(self._update_dashboard_ui)
+        self._dashboard_timer.setInterval(1000)
 
-        # 각인 검색 키워드 (사용자 요청)
+        self._dashboard_timer.timeout.connect(self._update_dashboard_timer)
+
         self._target_fonts = ["영문필기체", "영문바탕채", "한문바탕체", "한글바탕체"]
 
     # ------------------------------------------------------------------
@@ -741,11 +741,12 @@ class ReadInvoiceWidget(QWidget):
             # 1. 시작 시간 기록
             self._start_time = QDateTime.currentDateTime()
 
-            # 2. 타이머 시작 (실시간 갱신)
+            # 2. 타이머 시작
             self._dashboard_timer.start()
 
-            # 3. 대시보드 즉시 갱신
-            self._update_dashboard_ui()
+            # 3. 화면 즉시 갱신 (두 함수 모두 호출)
+            self._update_dashboard_counts()  # 가운데 창 (갯수+시작시간)
+            self._update_dashboard_timer()  # 오른쪽 창 (소요시간)
 
         except (OSError, IOError, ValueError) as e:
             QtWidgets.QMessageBox.critical(self, "엑셀 읽기 오류", str(e))
@@ -880,7 +881,7 @@ class ReadInvoiceWidget(QWidget):
 
         # 선택 풀기
         self.table.clearSelection()
-        self._update_dashboard_ui()
+        self._update_dashboard_counts()
 
     # ------------------------------------------------------------------
     # 문자 전송 버튼 (현재는 로그만 남김)
@@ -1272,51 +1273,82 @@ class ReadInvoiceWidget(QWidget):
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류 발생: {e}")
 
-    # [추가 위치: ReadInvoiceWidget 클래스 내부 메서드로 추가]
+    
 
-        # [수정 위치: ReadInvoiceWidget 클래스 내부 메서드]
-
-    def _update_dashboard_ui(self):
-        """오른쪽 정보창을 2개(갯수/시간)로 나눠서 실시간 표시"""
-
-        # 파일이 없을 때 처리
+    def _update_dashboard_counts(self):
+        """
+        [가운데 창] 업데이트:
+        1. 전체 작업 (완료/전체)
+        2. 각인 갯수 (완료/전체)
+        3. 시작 시간
+        """
         if self.current_df is None or self._start_time is None:
             self.info_dash_counts.setPlainText("▶ 파일 로드 대기 중...")
-            self.info_dash_time.setPlainText("-")
             return
 
-        # -------------------------------
-        # 1. 데이터 계산 (기존 로직 동일)
-        # -------------------------------
         total_rows = len(self.current_df)
 
+        # 타겟 컬럼 찾기
         target_col = None
         for col in ["품목명", "상품명"]:
             if col in self.current_df.columns:
                 target_col = col
                 break
 
-        count_remaining = 0
-        count_completed = 0
+        # --- 카운팅 변수 ---
+        completed_rows = 0  # 1번: 완료된 행 갯수
+
+        total_gagin_count = 0  # 2번: 전체 각인 글자 수
+        completed_gagin_count = 0  # 2번: 완료된 각인 글자 수
 
         if target_col:
             if "작업유무" not in self.current_df.columns:
                 self.current_df["작업유무"] = ""
 
-            # 전체 행 순회하며 카운트
             for i in range(total_rows):
                 item_name = str(self.current_df.iloc[i][target_col])
                 status = str(self.current_df.iloc[i]["작업유무"]).strip()
+                is_done = (status == "완료")
 
-                is_gagin_target = any(font in item_name for font in self._target_fonts)
+                # 1. 완료된 행 카운트
+                if is_done:
+                    completed_rows += 1
 
-                if is_gagin_target:
-                    if status == "완료":
-                        count_completed += 1
-                    else:
-                        count_remaining += 1
+                # 2. 각인 글자 수 카운트 (행별 합산)
+                row_gagin = 0
+                for kw in self._target_fonts:
+                    row_gagin += item_name.count(kw)
 
-        # 시간 계산
+                total_gagin_count += row_gagin
+                if is_done:
+                    completed_gagin_count += row_gagin
+
+        # 3. 시작 시간
+        start_time_str = self._start_time.toString("yyyy-MM-dd HH:mm:ss")
+
+        # --- 화면 출력 포맷 ---
+        # (완료 / 전체) 형식으로 통일하여 직관적으로 표시
+        text_counts = (
+            f"📊 [작업 현황]\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"1. 전체 작업 갯수 :  {completed_rows} / {total_rows} 건\n"
+            f"   (완료 / 전체 행)\n\n"
+            f"2. 각인 갯수 현황 :  {completed_gagin_count} / {total_gagin_count} 개\n"
+            f"   (완료 / 전체 키워드)\n\n"
+            f"3. 시작 시간 :\n"
+            f"   {start_time_str}"
+        )
+        self.info_dash_counts.setPlainText(text_counts)
+
+    def _update_dashboard_timer(self):
+        """
+        [오른쪽 창] 업데이트: 5번 항목 (실시간 소요 시간)
+        - 이 함수만 1초마다 실행됩니다.
+        """
+        if self._start_time is None:
+            self.info_dash_time.setPlainText("-")
+            return
+
         now = QDateTime.currentDateTime()
         seconds_diff = self._start_time.secsTo(now)
 
@@ -1328,33 +1360,12 @@ class ReadInvoiceWidget(QWidget):
         if hours > 0:
             time_elapsed_str = f"{hours}시간 " + time_elapsed_str
 
-        start_time_str = self._start_time.toString("yyyy-MM-dd HH:mm:ss")
-
-        # -------------------------------
-        # 2. 화면 출력 (분할 표시)
-        # -------------------------------
-
-        # [가운데] 갯수 정보 (1, 2, 3번)
-        text_counts = (
-            f"📊 [작업/각인 현황]\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"1. 전체 작업 갯수 : {total_rows} 건\n\n"
-            f"2. 남은 각인 갯수 : {count_remaining} 건 (▼)\n"
-            f"   (대상: 영문/한글/한문)\n\n"
-            f"3. 현재 각인 완료 : {count_completed} 건 (▲)"
-        )
-
-        # [오른쪽] 시간 정보 (4, 5번)
         text_time = (
-            f"⏰ [시간 정보]\n"
+            f"⏰ [실시간 소요]\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"4. 시작 시간 :\n"
-            f"   {start_time_str}\n\n"
-            f"5. 현재 소요 시간 :\n"
+            f"5. 현재 소요 시간 :\n\n"
             f"   {time_elapsed_str}"
         )
-
-        self.info_dash_counts.setPlainText(text_counts)
         self.info_dash_time.setPlainText(text_time)
 
 
