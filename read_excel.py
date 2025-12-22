@@ -12,7 +12,7 @@ from typing import Optional, List, Dict
 
 import pandas as pd
 from PyQt5 import QtWidgets, QtGui
-from PyQt5.QtCore import Qt, QDateTime
+from PyQt5.QtCore import Qt, QDateTime, QTimer
 from PyQt5.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -566,38 +566,55 @@ class ReadInvoiceWidget(QWidget):
         self._build_sms_panel(main_layout)
 
         # ============================================================
-        # [수정됨] 하단 로그 영역 (좌/우 분할)
+        # [수정됨] 하단 로그 영역 (3분할: 로그 | 작업현황 | 시간정보)
         # ============================================================
 
         # 1. 가로 배치를 위한 레이아웃 생성
         bottom_log_layout = QHBoxLayout()
         bottom_log_layout.setSpacing(10)
 
-        # 2. [왼쪽] 기존 작업 로그 (self.log)
+        # [1구역: 왼쪽] 기존 작업 로그 (self.log)
         self.log = QPlainTextEdit()
         self.log.setObjectName("ship_log")
         self.log.setReadOnly(True)
-        self.log.setPlaceholderText("▶ 왼쪽: 작업 로그가 여기에 표시됩니다.")
-        self.log.setFixedHeight(150)  # 높이 고정
+        self.log.setPlaceholderText("▶ [1] 작업 로그 기록")
+        self.log.setFixedHeight(150)
 
-        # 3. [오른쪽] 새로운 정보창 (self.info_log) -> 나중에 여기에 정보 띄우시면 됩니다
-        self.info_log = QPlainTextEdit()
-        self.info_log.setObjectName("info_log")
-        self.info_log.setReadOnly(True)
-        self.info_log.setPlaceholderText("▶ 오른쪽: 추가 정보가 여기에 표시됩니다.")
-        self.info_log.setFixedHeight(150)  # 높이 고정 (왼쪽과 동일하게)
+        # [2구역: 가운데] 작업 현황 (1, 2, 3번 항목)
+        self.info_dash_counts = QPlainTextEdit()
+        self.info_dash_counts.setReadOnly(True)
+        self.info_dash_counts.setPlaceholderText("▶ [2] 작업/각인 갯수 현황")
+        self.info_dash_counts.setFixedHeight(150)
 
-        # 4. 레이아웃에 추가 (비율 1:1)
+        # [3구역: 오른쪽] 시간 정보 (4, 5번 항목)
+        self.info_dash_time = QPlainTextEdit()
+        self.info_dash_time.setReadOnly(True)
+        self.info_dash_time.setPlaceholderText("▶ [3] 시작/소요 시간")
+        self.info_dash_time.setFixedHeight(150)
+
+        # 레이아웃에 추가 (비율 1:1:1)
         bottom_log_layout.addWidget(self.log, 1)
-        bottom_log_layout.addWidget(self.info_log, 1)
+        bottom_log_layout.addWidget(self.info_dash_counts, 1)
+        bottom_log_layout.addWidget(self.info_dash_time, 1)
 
-        # 5. 전체 레이아웃에 하단 영역 추가
+        # 전체 레이아웃에 하단 영역 추가
         main_layout.addLayout(bottom_log_layout)
 
         # 시그널
         self.btn_open.clicked.connect(self.on_click_open)
         self.table.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
+
+        # -------------------------
+        # [추가] 대시보드용 변수 및 타이머
+        # -------------------------
+        self._start_time = None  # 엑셀 불러온 시간
+        self._dashboard_timer = QTimer(self)
+        self._dashboard_timer.setInterval(1000)  # 1초(1000ms)마다 갱신
+        self._dashboard_timer.timeout.connect(self._update_dashboard_ui)
+
+        # 각인 검색 키워드 (사용자 요청)
+        self._target_fonts = ["영문필기체", "영문바탕채", "한문바탕체", "한글바탕체"]
 
     # ------------------------------------------------------------------
     # 문자 전송 UI
@@ -720,6 +737,15 @@ class ReadInvoiceWidget(QWidget):
             self._setup_image_store()
             self._show_df_in_table(df)
             self._log_columns(df, invoice_type, file_path)
+
+            # 1. 시작 시간 기록
+            self._start_time = QDateTime.currentDateTime()
+
+            # 2. 타이머 시작 (실시간 갱신)
+            self._dashboard_timer.start()
+
+            # 3. 대시보드 즉시 갱신
+            self._update_dashboard_ui()
 
         except (OSError, IOError, ValueError) as e:
             QtWidgets.QMessageBox.critical(self, "엑셀 읽기 오류", str(e))
@@ -854,6 +880,7 @@ class ReadInvoiceWidget(QWidget):
 
         # 선택 풀기
         self.table.clearSelection()
+        self._update_dashboard_ui()
 
     # ------------------------------------------------------------------
     # 문자 전송 버튼 (현재는 로그만 남김)
@@ -1244,6 +1271,92 @@ class ReadInvoiceWidget(QWidget):
                                                "엑셀 파일이 열려 있어 저장할 수 없습니다.\n파일을 닫고 다시 시도해주세요.")
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류 발생: {e}")
+
+    # [추가 위치: ReadInvoiceWidget 클래스 내부 메서드로 추가]
+
+        # [수정 위치: ReadInvoiceWidget 클래스 내부 메서드]
+
+    def _update_dashboard_ui(self):
+        """오른쪽 정보창을 2개(갯수/시간)로 나눠서 실시간 표시"""
+
+        # 파일이 없을 때 처리
+        if self.current_df is None or self._start_time is None:
+            self.info_dash_counts.setPlainText("▶ 파일 로드 대기 중...")
+            self.info_dash_time.setPlainText("-")
+            return
+
+        # -------------------------------
+        # 1. 데이터 계산 (기존 로직 동일)
+        # -------------------------------
+        total_rows = len(self.current_df)
+
+        target_col = None
+        for col in ["품목명", "상품명"]:
+            if col in self.current_df.columns:
+                target_col = col
+                break
+
+        count_remaining = 0
+        count_completed = 0
+
+        if target_col:
+            if "작업유무" not in self.current_df.columns:
+                self.current_df["작업유무"] = ""
+
+            # 전체 행 순회하며 카운트
+            for i in range(total_rows):
+                item_name = str(self.current_df.iloc[i][target_col])
+                status = str(self.current_df.iloc[i]["작업유무"]).strip()
+
+                is_gagin_target = any(font in item_name for font in self._target_fonts)
+
+                if is_gagin_target:
+                    if status == "완료":
+                        count_completed += 1
+                    else:
+                        count_remaining += 1
+
+        # 시간 계산
+        now = QDateTime.currentDateTime()
+        seconds_diff = self._start_time.secsTo(now)
+
+        hours = seconds_diff // 3600
+        minutes = (seconds_diff % 3600) // 60
+        seconds = seconds_diff % 60
+
+        time_elapsed_str = f"{minutes}분 {seconds}초"
+        if hours > 0:
+            time_elapsed_str = f"{hours}시간 " + time_elapsed_str
+
+        start_time_str = self._start_time.toString("yyyy-MM-dd HH:mm:ss")
+
+        # -------------------------------
+        # 2. 화면 출력 (분할 표시)
+        # -------------------------------
+
+        # [가운데] 갯수 정보 (1, 2, 3번)
+        text_counts = (
+            f"📊 [작업/각인 현황]\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"1. 전체 작업 갯수 : {total_rows} 건\n\n"
+            f"2. 남은 각인 갯수 : {count_remaining} 건 (▼)\n"
+            f"   (대상: 영문/한글/한문)\n\n"
+            f"3. 현재 각인 완료 : {count_completed} 건 (▲)"
+        )
+
+        # [오른쪽] 시간 정보 (4, 5번)
+        text_time = (
+            f"⏰ [시간 정보]\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"4. 시작 시간 :\n"
+            f"   {start_time_str}\n\n"
+            f"5. 현재 소요 시간 :\n"
+            f"   {time_elapsed_str}"
+        )
+
+        self.info_dash_counts.setPlainText(text_counts)
+        self.info_dash_time.setPlainText(text_time)
+
 
 # ----------------------------------------------------------------------
 # 단독 실행 테스트용
