@@ -459,6 +459,25 @@ class ImageManageDialog(QDialog):
 
 
 # ----------------------------------------------------------------------
+# [추가] 색상 혼합을 위한 전용 페인트공 (Delegate)
+# ----------------------------------------------------------------------
+class BlendDelegate(QtWidgets.QStyledItemDelegate):
+    def paint(self, painter, option, index):
+        # 1. 먼저 "선택되지 않은 척"하고 원래 배경(노랑/흰색)과 글자를 그립니다.
+        opt = QtWidgets.QStyleOptionViewItem(option)
+        opt.state &= ~QtWidgets.QStyle.State_Selected
+        super().paint(painter, opt, index)
+
+        # 2. 만약 실제로 "선택된 상태"라면, 그 위에 반투명한 파란색을 덧칠합니다.
+        if option.state & QtWidgets.QStyle.State_Selected:
+            painter.save()
+            # 색상: 하늘색(R, G, B) / 투명도(Alpha: 100) -> 이 숫자를 조절하면 색감이 바뀜
+            # 노란색(배경) + 하늘색(덧칠) = 연두색(초록빛)으로 보임
+            color = QtGui.QColor(0, 120, 215, 100)
+            painter.fillRect(option.rect, color)
+            painter.restore()
+
+# ----------------------------------------------------------------------
 # 메인 탭 위젯
 # ----------------------------------------------------------------------
 class ReadInvoiceWidget(QWidget):
@@ -513,12 +532,9 @@ class ReadInvoiceWidget(QWidget):
         # -------------------------
         self.table = QTableWidget()
         self.table.setObjectName("ship_table")
-        self.table.setStyleSheet("""
-                    QTableWidget::item:selected {
-                        background-color: #87CEFA;  /* 연한 하늘색 (Light Sky Blue) */
-                        color: #000000;             /* 글자색은 검정 */
-                    }
-                """)
+
+        self.table.setItemDelegate(BlendDelegate(self.table))
+        
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -691,7 +707,6 @@ class ReadInvoiceWidget(QWidget):
         self.btn_send_selected.clicked.connect(self.on_send_selected)
         self.btn_send_all.clicked.connect(self.on_send_all)
 
-    # [추가 위치: ReadInvoiceWidget 클래스 내부 아무데나]
     def on_toggle_sms(self):
         # 현재 보이는 상태인지 확인
         is_visible = self.grp_sms.isVisible()
@@ -752,7 +767,6 @@ class ReadInvoiceWidget(QWidget):
             QtWidgets.QMessageBox.critical(self, "엑셀 읽기 오류", str(e))
             self.log.appendPlainText(f"[오류] 엑셀을 읽는 중 문제가 발생했습니다: {e}")
 
-    # [수정 위치: ReadInvoiceWidget 클래스 내부]
     def on_item_double_clicked(self, item: QTableWidgetItem):
         if self.current_df is None:
             return
