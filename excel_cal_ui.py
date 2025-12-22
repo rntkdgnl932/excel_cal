@@ -995,7 +995,6 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
 
                 new_data[work_status] = ""
 
-                new_data.insert(0, "메모", "")
 
                 # 데이터프레임을 엑셀 파일로 저장
                 excel_file_name = dir_path + last + "네이버_송장발부.xlsx"
@@ -1011,6 +1010,9 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
                 # === 추가: 품목 전체 표기 버전 엑셀도 함께 저장 ===
                 # new_data에는 dd(품목명)가 잘린 버전, gagin(각인)에 전체 문구가 들어있다.
                 new_data_full = new_data.copy()
+
+                new_data_full.insert(0, "메모", "")
+
                 if gagin in new_data_full.columns:
                     # '품목명' 컬럼에 '각인'에 들어있는 전체 내용을 그대로 넣어준다.
                     new_data_full[dd] = new_data_full[gagin]
@@ -1388,7 +1390,6 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
 
                 new_data[work_status] = ""
 
-                new_data.insert(0, "메모", "")
 
                 # 데이터프레임을 엑셀 파일로 저장
                 excel_file_name = dir_path + last + "쿠팡_송장발부.xlsx"
@@ -1402,6 +1403,9 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
 
                 # === 추가: 품목 전체 표기 버전 엑셀도 함께 저장 ===
                 new_data_full = new_data.copy()
+
+                new_data_full.insert(0, "메모", "")
+
                 if gagin in new_data_full.columns:
                     new_data_full[dd] = new_data_full[gagin]
 
