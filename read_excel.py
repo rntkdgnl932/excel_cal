@@ -1035,6 +1035,8 @@ class ReadInvoiceWidget(QWidget):
         self.table.resizeColumnsToContents()
         self.table.resizeRowsToContents()
 
+        self.table.setSortingEnabled(True)
+
     def _make_photo_button_handler(self, row_idx: int):
         def handler():
             self._open_image_manager(row_idx)
