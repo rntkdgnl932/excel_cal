@@ -916,11 +916,26 @@ class ReadInvoiceWidget(QWidget):
     # ------------------------------------------------------------------
     @staticmethod
     def _load_naver_invoice(file_path: str) -> pd.DataFrame:
-        return pd.read_excel(file_path)
+        df = pd.read_excel(file_path)
+
+        # [추가] 빈 칸(NaN)을 숫자로 착각하지 않도록, 문자열(object)로 강제 변환
+        # 이렇게 하면 '메모'나 '작업유무'에 글자를 넣어도 경고가 안 뜹니다.
+        for col in ["작업유무", "메모"]:
+            if col in df.columns:
+                df[col] = df[col].astype(object)
+
+        return df
 
     @staticmethod
     def _load_coupang_invoice(file_path: str) -> pd.DataFrame:
-        return pd.read_excel(file_path)
+        df = pd.read_excel(file_path)
+
+        # [추가] 쿠팡도 똑같이 처리
+        for col in ["작업유무", "메모"]:
+            if col in df.columns:
+                df[col] = df[col].astype(object)
+
+        return df
 
     # ------------------------------------------------------------------
     # 이미지 저장 위치 / meta.json 세팅
