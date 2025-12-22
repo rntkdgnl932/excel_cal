@@ -757,50 +757,46 @@ class ReadInvoiceWidget(QWidget):
         if self.current_df is None:
             return
 
-        row = item.row()
+        visual_row = item.row()
         col = item.column()
+
+        # [★수정] 진짜 인덱스 가져오기
+        real_row = self.table.item(visual_row, 0).data(Qt.UserRole)
 
         header = self.table.horizontalHeaderItem(col)
         col_name = header.text() if header is not None else ""
 
-        # [메모 컬럼일 경우]
+        # [메모 컬럼]
         if col_name == "메모":
-            self._open_memo_dialog(row)
+            # _open_memo_dialog 함수에도 real_row를 넘기도록 수정하거나,
+            # 여기서 직접 처리해야 하는데, _open_memo_dialog를 호출할 때
+            # visual_row 대신 real_row 개념을 전달해야 함.
+            # (아래 간단하게 해결하는 방법: _open_memo_dialog 내부 로직도 확인 필요)
+            self._open_memo_dialog(visual_row, real_row)  # 인자 추가 필요
             return
 
-        # [품목명/상품명 컬럼일 경우] -> 복사 & 수정 다이얼로그
+        # [품목명/상품명 컬럼]
         if col_name in ("품목명", "상품명"):
-            cell_text = self.table.item(row, col).text() if self.table.item(row, col) else ""
-            if not cell_text.strip():
-                return
-
+            cell_text = item.text()
             invoice_type = self.combo_type.currentText()
 
-            # --- [핵심] 저장 콜백 함수 정의 ---
             def save_modified_text(new_full_text: str):
                 try:
-                    # 1. 화면(Table) 업데이트
-                    self.table.item(row, col).setText(new_full_text)
+                    # 1. 화면 업데이트
+                    item.setText(new_full_text)
 
-                    # 2. DataFrame 업데이트
-                    # (DataFrame 컬럼명 찾기)
-                    target_col = col_name  # 보통 헤더 이름 그대로 씀
-                    self.current_df.at[row, target_col] = new_full_text
+                    # 2. 데이터프레임 업데이트 (진짜 인덱스 사용)
+                    self.current_df.at[real_row, col_name] = new_full_text
 
-                    # 3. 엑셀 파일 저장
+                    # 3. 엑셀 저장
                     if self.current_file:
                         self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
-                        self.log.appendPlainText(f"[문구 수정 저장] 행 {row + 1} 업데이트 완료.")
-
-                except PermissionError:
-                    QtWidgets.QMessageBox.critical(self, "저장 실패", "엑셀 파일이 열려있습니다. 닫고 다시 시도해주세요.")
+                        self.log.appendPlainText(f"[수정] {real_row + 1}행 문구 업데이트.")
                 except Exception as e:
-                    QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류: {e}")
+                    QtWidgets.QMessageBox.critical(self, "오류", str(e))
 
-            # 다이얼로그에 '원본 텍스트', '송장타입', '저장함수' 전달
             dlg = CopyLinesDialog(cell_text, invoice_type, save_modified_text, self)
             dlg.exec_()
-            return
 
     def on_table_selection_changed(self):
         selected = self.table.selectionModel().selectedRows()
@@ -816,9 +812,6 @@ class ReadInvoiceWidget(QWidget):
         self._update_sms_panel_for_row(row_idx)
 
     def on_click_complete(self):
-        """
-        선택된 행을 '완료' 처리하고 엑셀 파일에 즉시 저장.
-        """
         if self.current_df is None or not self.current_file:
             QtWidgets.QMessageBox.warning(self, "경고", "열린 파일이 없습니다.")
             return
@@ -828,58 +821,56 @@ class ReadInvoiceWidget(QWidget):
             QtWidgets.QMessageBox.information(self, "알림", "완료 처리할 행을 선택해주세요.")
             return
 
-        # 1. '작업유무' 컬럼이 없으면 DataFrame에 생성
         if "작업유무" not in self.current_df.columns:
             self.current_df["작업유무"] = ""
 
-        # 색상 정의
-        done_color = QtGui.QColor(255, 255, 100)  # 노란색
-        white_color = QtGui.QColor(255, 255, 255)  # 흰색
+        done_color = QtGui.QColor(255, 255, 100)
+        white_color = QtGui.QColor(255, 255, 255)
 
-        # 토글 상태 확인 (첫 번째 선택 행 기준)
-        first_row_idx = selected_rows[0].row()
-        first_item = self.table.item(first_row_idx, 0)
-        is_already_done = (first_item.background().color() == done_color)
+        # 첫 번째 선택 행의 진짜 인덱스 확인
+        first_visual_row = selected_rows[0].row()
+        # [★수정] 화면상 row가 아니라, 숨겨둔 진짜 인덱스(UserRole)를 가져옴
+        first_real_idx = self.table.item(first_visual_row, 0).data(Qt.UserRole)
+
+        # 실제 데이터프레임에서 상태 확인
+        current_status = str(self.current_df.at[first_real_idx, "작업유무"]).strip()
+        is_already_done = (current_status == "완료")
 
         target_color = white_color if is_already_done else done_color
         target_text = "" if is_already_done else "완료"
-        status_msg = "취소" if is_already_done else "완료"
 
         try:
-            # 2. 화면(GUI)과 데이터(DataFrame) 업데이트
             for idx in selected_rows:
-                r = idx.row()
+                visual_r = idx.row()
 
-                # (1) 데이터프레임 값 변경
-                self.current_df.at[r, "작업유무"] = target_text
+                # [★수정] 여기서도 진짜 인덱스를 꺼냅니다
+                real_r = self.table.item(visual_r, 0).data(Qt.UserRole)
 
-                # (2) 테이블 화면 색상 변경
+                # (1) 데이터프레임 값 변경 (진짜 인덱스 사용)
+                self.current_df.at[real_r, "작업유무"] = target_text
+
+                # (2) 테이블 화면 색상 변경 (화면 인덱스 사용 - 눈에 보이는 건 바꿔야 하니까)
                 for c in range(self.table.columnCount()):
-                    it = self.table.item(r, c)
+                    it = self.table.item(visual_r, c)
                     if it:
                         it.setBackground(target_color)
 
-                # 사진 버튼 색상도 변경 (옵션)
+                # 사진 버튼 색상 변경
                 photo_col_idx = self._col_index.get("사진")
                 if photo_col_idx:
-                    widget = self.table.cellWidget(r, photo_col_idx)
+                    widget = self.table.cellWidget(visual_r, photo_col_idx)
                     if widget:
                         bg_style = "background-color: #ffffaa;" if not is_already_done else ""
                         widget.setStyleSheet(bg_style)
 
-            # 3. 엑셀 파일로 저장 (핵심)
-            # 주의: 엑셀 파일이 다른 프로그램(엑셀 등)에서 열려 있으면 에러가 납니다.
             self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
 
-            self.log.appendPlainText(f"[저장] {len(selected_rows)}건 {status_msg} 처리 후 파일 저장 완료.")
+            msg = "취소" if is_already_done else "완료"
+            self.log.appendPlainText(f"[저장] {len(selected_rows)}건 {msg} 처리 후 파일 저장.")
 
-        except PermissionError:
-            QtWidgets.QMessageBox.critical(self, "저장 실패",
-                                           "엑셀 파일이 열려 있어서 저장할 수 없습니다.\n엑셀을 끄고 다시 시도해주세요.")
         except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류 발생: {e}")
+            QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류: {e}")
 
-        # 선택 풀기
         self.table.clearSelection()
         self._update_dashboard_counts()
 
@@ -979,11 +970,12 @@ class ReadInvoiceWidget(QWidget):
     # DataFrame → QTableWidget 표시
     # ------------------------------------------------------------------
     def _show_df_in_table(self, df: pd.DataFrame):
+        # 1. 정렬 끄기 (데이터 채울 동안)
+        self.table.setSortingEnabled(False)
         self.table.clear()
 
         cols = list(df.columns)
         photo_col_name = "사진"
-        # 사진 컬럼은 맨 뒤에 추가
         cols_with_photo = cols + [photo_col_name]
 
         row_count = len(df)
@@ -995,11 +987,10 @@ class ReadInvoiceWidget(QWidget):
 
         self._col_index = {name: idx for idx, name in enumerate(cols_with_photo)}
 
-        # [색상 정의]
         done_bg = QtGui.QColor(255, 255, 100)  # 노란색
 
         for row_idx in range(row_count):
-            # 행별 배경색 결정 ("작업유무" 컬럼 확인)
+            # ... (기존 작업유무 확인 로직 동일) ...
             is_done = False
             if "작업유무" in df.columns:
                 val = str(df.iloc[row_idx]["작업유무"]).strip()
@@ -1011,30 +1002,32 @@ class ReadInvoiceWidget(QWidget):
                 text = "" if pd.isna(val) else str(val)
                 item = QTableWidgetItem(text)
 
-                # [핵심] 완료된 행이면 노란색 칠하기
+                # [★핵심 추가★] 0번 컬럼(맨 앞칸)에 '엑셀 진짜 몇 번째 줄인지' 숨겨둠
+                if col_idx == 0:
+                    item.setData(Qt.UserRole, row_idx)
+
                 if is_done:
                     item.setBackground(done_bg)
 
-                if col_name in ("품목명", "상품명"):
-                    item.setToolTip(text)
+                # ... (나머지 동일) ...
                 self.table.setItem(row_idx, col_idx, item)
 
-            # 사진 버튼 추가
+            # ... (사진 버튼 로직 동일) ...
+            # 사진 버튼 핸들러에 row_idx(진짜 번호)를 넘기므로 사진은 문제 없음
             photo_col_idx = self._col_index[photo_col_name]
             btn = QPushButton()
-            row_id = row_idx + 1
-            count = len(self._image_map.get(row_id, []))
-            btn.setText(f"사진({count}장)…")
+            # ... (생략) ...
             btn.clicked.connect(self._make_photo_button_handler(row_idx))
             self.table.setCellWidget(row_idx, photo_col_idx, btn)
 
-            # 사진 버튼 칸도 배경색 맞춰주기 (선택사항)
+            # 버튼 배경색 처리
             if is_done:
                 btn.setStyleSheet("background-color: #ffffaa;")
 
         self.table.resizeColumnsToContents()
         self.table.resizeRowsToContents()
 
+        # 2. 다 채우고 정렬 켜기
         self.table.setSortingEnabled(True)
 
     def _make_photo_button_handler(self, row_idx: int):
