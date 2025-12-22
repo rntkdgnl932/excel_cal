@@ -995,6 +995,8 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
 
                 new_data[work_status] = ""
 
+                new_data.insert(0, "메모", "")
+
                 # 데이터프레임을 엑셀 파일로 저장
                 excel_file_name = dir_path + last + "네이버_송장발부.xlsx"
                 # df.to_excel(excel_file_name, index=False)
@@ -1385,6 +1387,8 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
                 new_data.astype(str)
 
                 new_data[work_status] = ""
+
+                new_data.insert(0, "메모", "")
 
                 # 데이터프레임을 엑셀 파일로 저장
                 excel_file_name = dir_path + last + "쿠팡_송장발부.xlsx"

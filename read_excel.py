@@ -45,99 +45,237 @@ from PyQt5.QtWidgets import (
 # 아래 코드처럼 QtWidgets.QScrollArea로 쓰면 import 수정 안 해도 됩니다.)
 
 class CopyLinesDialog(QDialog):
-    def __init__(self, lines: List[str], parent=None):
+    def __init__(self, full_text: str, invoice_type: str, save_callback, parent=None):
         super().__init__(parent)
+        self.setWindowTitle("문구 복사 & 수정")
+        self.resize(650, 500)
 
-        self.setWindowTitle("문구 복사")
-        self.resize(600, 500)  # 창 크기 고정 (이제 내용 많아도 스크롤 생김)
+        self.save_callback = save_callback  # 저장 시 호출할 함수 (엑셀 반영용)
+        self.raw_lines = full_text.splitlines()  # 원본 줄들 (보존용)
+        self.parsed_items = []  # 화면에 표시할 파싱된 데이터
 
-        self._line_edits: List[QLineEdit] = []
-        self._buttons: List[QPushButton] = []
+        # ---------------------------------------------------------
+        # 1. 문구 파싱 (수정 시 재조립을 위해 앞/뒤 문맥까지 분리)
+        # ---------------------------------------------------------
+        for idx, line in enumerate(self.raw_lines):
+            # 파싱 로직을 여기로 가져옴
+            parts = self._parse_structure(line, invoice_type)
+            if parts:
+                # parts = (prefix, core, suffix)
+                self.parsed_items.append({
+                    "line_idx": idx,
+                    "prefix": parts[0],
+                    "core": parts[1],
+                    "suffix": parts[2]
+                })
 
-        # 전체 레이아웃
+        # ---------------------------------------------------------
+        # 2. UI 구성
+        # ---------------------------------------------------------
         main_layout = QVBoxLayout(self)
 
-        # 1. 상단 안내 문구
+        # 상단 안내
         top_layout = QVBoxLayout()
-        info = QLabel("복사하려는 문구 옆의 [COPY] 버튼을 클릭하세요.")
+        info = QLabel("문구를 [수정] 후 [저장]하면 엑셀에도 반영됩니다.")
         self.lbl_last = QLabel("마지막 복사: 없음")
-        # 보기 좋게 스타일 좀 넣었습니다
         self.lbl_last.setStyleSheet("color: blue; font-weight: bold;")
-
         top_layout.addWidget(info)
         top_layout.addWidget(self.lbl_last)
         main_layout.addLayout(top_layout)
 
-        # 2. 스크롤 영역 (핵심!)
+        # 스크롤 영역
         scroll_area = QtWidgets.QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
 
-        # 스크롤 안에 들어갈 실제 내용물 위젯
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
 
-        for idx, text in enumerate(lines):
+        self._ui_rows = []  # (edit, btn_edit, btn_copy, item_data) 저장용
+
+        for item in self.parsed_items:
             row_layout = QHBoxLayout()
 
+            # 텍스트 입력창
             edit = QLineEdit()
+            edit.setText(item["core"])
             edit.setReadOnly(True)
-            edit.setText(text)
+            edit.setStyleSheet("background-color: #f0f0f0; color: #333;")
 
+            # 수정/저장 버튼
+            btn_edit = QPushButton("수정")
+            btn_edit.setFixedWidth(60)
+
+            # 복사 버튼
             btn_copy = QPushButton("COPY")
-            btn_copy.setFixedWidth(80)
+            btn_copy.setFixedWidth(70)
 
             # 핸들러 연결
-            btn_copy.clicked.connect(self._make_copy_handler(idx, text))
+            # 주의: 루프 변수 캡처를 위해 별도 메서드로 연결
+            self._connect_handlers(edit, btn_edit, btn_copy, item)
 
             row_layout.addWidget(edit, 1)
+            row_layout.addWidget(btn_edit)
             row_layout.addWidget(btn_copy)
-
             content_layout.addLayout(row_layout)
 
-            # 리스트에 저장 (나중에 색깔 바꾸려고)
-            self._line_edits.append(edit)
-            self._buttons.append(btn_copy)
+            self._ui_rows.append({
+                "edit": edit,
+                "btn_edit": btn_edit,
+                "btn_copy": btn_copy
+            })
 
-        # 내용이 적을 때 위로 붙게 함
         content_layout.addStretch(1)
-
-        # 위젯 배치
         content_widget.setLayout(content_layout)
         scroll_area.setWidget(content_widget)
-
-        # 스크롤 영역을 메인 레이아웃에 추가
         main_layout.addWidget(scroll_area, 1)
 
-        # 3. 하단 닫기 버튼
+        # 닫기 버튼
         btn_close = QPushButton("닫기")
         btn_close.clicked.connect(self.accept)
         main_layout.addWidget(btn_close)
 
-    def _make_copy_handler(self, idx: int, text: str):
-        def handler():
+    def _parse_structure(self, line: str, invoice_type: str):
+        """
+        한 줄을 (접두어, 핵심문구, 접미어)로 분리합니다.
+        분해 실패 시(패턴 불일치) None 반환.
+        """
+        s = line.strip()
+        # 공통: 숫자+점(1.) 으로 시작하는지 확인
+        if not re.match(r"^\d+\.", s):
+            return None
+
+        # 핵심 문구 추출 로직 (기존과 동일하되 위치를 찾음)
+        core = ""
+
+        # 1) 앞부분(Prefix) 잘라내기
+        # 네이버: "1. 품목명" -> "1. " + "품목명"
+        # 쿠팡: "1. 옵션: 품목명" -> "1. 옵션: " + "품목명" (대략적)
+
+        # 편의상 기존 로직을 활용해 'core' 텍스트를 먼저 찾습니다.
+        temp_core = ""
+        if invoice_type == "네이버 송장":
+            body = s.split(".", 1)[1].lstrip()  # "1." 떼고 나머지
+            idx = body.find("/ 각인체")
+            if idx != -1:
+                temp_core = body[:idx].strip()
+            elif "=>" in body:
+                temp_core = body.split("=>", 1)[0].strip()
+            else:
+                temp_core = body.strip()
+        else:  # 쿠팡
+            body = s
+            if ":" in body:
+                body = body.split(":", 1)[1]
+            if "=>" in body:
+                temp_core = body.split("=>", 1)[0].strip()
+            else:
+                temp_core = body.strip()
+
+        if not temp_core:
+            return None
+
+        # 2) 원본 문자열에서 temp_core의 위치를 찾아서 정확히 3등분
+        # (주의: temp_core가 여러 번 나올 수 있으나, 보통 구조상 한 번 나옴. 첫 번째로 처리)
+        start_idx = line.find(temp_core)
+        if start_idx == -1:
+            return None
+
+        prefix = line[:start_idx]
+        suffix = line[start_idx + len(temp_core):]
+
+        return (prefix, temp_core, suffix)
+
+    def _connect_handlers(self, edit, btn_edit, btn_copy, item_data):
+        # 수정/저장 버튼 로직
+        def on_edit_click():
+            if btn_edit.text() == "수정":
+                # 수정 모드 진입
+                edit.setReadOnly(False)
+                edit.setFocus()
+                edit.setStyleSheet("background-color: #ffffff; color: #000; border: 2px solid #4dabf7;")
+                btn_edit.setText("저장")
+                btn_edit.setStyleSheet("color: blue; font-weight: bold;")
+                # 저장 모드일 땐 복사 비활성화 (선택)
+                btn_copy.setEnabled(False)
+            else:
+                # 저장 로직 수행
+                new_text = edit.text()
+
+                # 1. 데이터 업데이트 (메모리)
+                item_data["core"] = new_text
+
+                # 2. 원본 라인 재조립
+                new_line = item_data["prefix"] + new_text + item_data["suffix"]
+                self.raw_lines[item_data["line_idx"]] = new_line
+
+                # 3. 전체 텍스트 합치기
+                new_full_text = "\n".join(self.raw_lines)
+
+                # 4. 부모창(Widget)에 저장 요청!
+                self.save_callback(new_full_text)
+
+                # UI 복귀
+                edit.setReadOnly(True)
+                edit.setStyleSheet("background-color: #f0f0f0; color: #333;")
+                btn_edit.setText("수정")
+                btn_edit.setStyleSheet("")
+                btn_copy.setEnabled(True)
+
+        # 복사 버튼 로직
+        def on_copy_click():
+            text = edit.text()
             QApplication.clipboard().setText(text)
-            self._mark_copied(idx, text)
+            self._mark_copied(text)
 
-        return handler
+        btn_edit.clicked.connect(on_edit_click)
+        btn_copy.clicked.connect(on_copy_click)
 
-    def _mark_copied(self, idx: int, text: str):
-        # 전부 초기화
-        for btn in self._buttons:
-            btn.setText("COPY")
-        for edit in self._line_edits:
-            edit.setStyleSheet("")
+    def _mark_copied(self, text: str):
+        # 모든 버튼 'COPY'로 초기화
+        for row in self._ui_rows:
+            row["btn_copy"].setText("COPY")
 
-        # 선택된 줄 강조
-        if 0 <= idx < len(self._buttons):
-            self._buttons[idx].setText("✔ 완료")
-        if 0 <= idx < len(self._line_edits):
-            self._line_edits[idx].setStyleSheet("background-color: #fff8c6;")  # 연한 노랑
+        # 현재 누른 버튼 찾아서 '완료' 표시 (sender 이용하거나 해서)
+        sender = self.sender()
+        if sender:
+            sender.setText("✔ 완료")
 
         self.lbl_last.setText(f"마지막 복사: {text}")
+# ----------------------------------------------------------------------
+# 메모기능
+# ----------------------------------------------------------------------
+class MemoDialog(QDialog):
+    def __init__(self, current_text: str = "", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("메모 작성")
+        self.resize(400, 300)
 
+        layout = QVBoxLayout(self)
 
+        self.txt_memo = QPlainTextEdit()
+        self.txt_memo.setPlaceholderText("여기에 메모를 입력하세요...")
+        self.txt_memo.setPlainText(current_text)
+        layout.addWidget(self.txt_memo)
 
+        btn_layout = QHBoxLayout()
+        btn_save = QPushButton("저장")
+        btn_close = QPushButton("닫기")
+
+        btn_save.clicked.connect(self.accept)  # accept -> 결과 OK
+        btn_close.clicked.connect(self.reject)  # reject -> 취소
+
+        # 저장 버튼 스타일 (파란색)
+        btn_save.setStyleSheet("background-color: #4dabf7; color: white; font-weight: bold;")
+
+        btn_layout.addStretch(1)
+        btn_layout.addWidget(btn_save)
+        btn_layout.addWidget(btn_close)
+
+        layout.addLayout(btn_layout)
+
+    def get_text(self):
+        return self.txt_memo.toPlainText()
 # ----------------------------------------------------------------------
 # 이미지 관리 다이얼로그: 행별 여러 장 추가/삭제/미리보기
 # ----------------------------------------------------------------------
@@ -405,6 +543,15 @@ class ReadInvoiceWidget(QWidget):
         main_layout.addWidget(self.btn_complete)
 
         # ============================================================
+        # [추가됨] 메모 작성 버튼
+        # ============================================================
+        # self.btn_memo = QPushButton("📝 선택된 주문 '메모' 작성/수정")
+        # self.btn_memo.setFixedHeight(30)
+        # self.btn_memo.clicked.connect(self.on_click_memo)
+        # main_layout.addWidget(self.btn_memo)
+        # ============================================================
+
+        # ============================================================
         # [추가됨] 문자 전송 패널 토글 버튼
         # ============================================================
         self.btn_toggle_sms = QPushButton("💬 문자 전송 패널 열기 (클릭)")
@@ -418,14 +565,34 @@ class ReadInvoiceWidget(QWidget):
         # -------------------------
         self._build_sms_panel(main_layout)
 
-        # -------------------------
-        # 로그 (ship_log)
-        # -------------------------
+        # ============================================================
+        # [수정됨] 하단 로그 영역 (좌/우 분할)
+        # ============================================================
+
+        # 1. 가로 배치를 위한 레이아웃 생성
+        bottom_log_layout = QHBoxLayout()
+        bottom_log_layout.setSpacing(10)
+
+        # 2. [왼쪽] 기존 작업 로그 (self.log)
         self.log = QPlainTextEdit()
         self.log.setObjectName("ship_log")
         self.log.setReadOnly(True)
-        self.log.setFixedHeight(150)
-        main_layout.addWidget(self.log)
+        self.log.setPlaceholderText("▶ 왼쪽: 작업 로그가 여기에 표시됩니다.")
+        self.log.setFixedHeight(150)  # 높이 고정
+
+        # 3. [오른쪽] 새로운 정보창 (self.info_log) -> 나중에 여기에 정보 띄우시면 됩니다
+        self.info_log = QPlainTextEdit()
+        self.info_log.setObjectName("info_log")
+        self.info_log.setReadOnly(True)
+        self.info_log.setPlaceholderText("▶ 오른쪽: 추가 정보가 여기에 표시됩니다.")
+        self.info_log.setFixedHeight(150)  # 높이 고정 (왼쪽과 동일하게)
+
+        # 4. 레이아웃에 추가 (비율 1:1)
+        bottom_log_layout.addWidget(self.log, 1)
+        bottom_log_layout.addWidget(self.info_log, 1)
+
+        # 5. 전체 레이아웃에 하단 영역 추가
+        main_layout.addLayout(bottom_log_layout)
 
         # 시그널
         self.btn_open.clicked.connect(self.on_click_open)
@@ -558,6 +725,7 @@ class ReadInvoiceWidget(QWidget):
             QtWidgets.QMessageBox.critical(self, "엑셀 읽기 오류", str(e))
             self.log.appendPlainText(f"[오류] 엑셀을 읽는 중 문제가 발생했습니다: {e}")
 
+    # [수정 위치: ReadInvoiceWidget 클래스 내부]
     def on_item_double_clicked(self, item: QTableWidgetItem):
         if self.current_df is None:
             return
@@ -568,29 +736,44 @@ class ReadInvoiceWidget(QWidget):
         header = self.table.horizontalHeaderItem(col)
         col_name = header.text() if header is not None else ""
 
-        if col_name not in ("품목명", "상품명"):
-            self.log.appendPlainText(
-                "※ 품목명/상품명 컬럼에서만 더블클릭 복사가 동작합니다."
-            )
+        # [메모 컬럼일 경우]
+        if col_name == "메모":
+            self._open_memo_dialog(row)
             return
 
-        cell_text = self.table.item(row, col).text() if self.table.item(row, col) else ""
-        if not cell_text.strip():
+        # [품목명/상품명 컬럼일 경우] -> 복사 & 수정 다이얼로그
+        if col_name in ("품목명", "상품명"):
+            cell_text = self.table.item(row, col).text() if self.table.item(row, col) else ""
+            if not cell_text.strip():
+                return
+
+            invoice_type = self.combo_type.currentText()
+
+            # --- [핵심] 저장 콜백 함수 정의 ---
+            def save_modified_text(new_full_text: str):
+                try:
+                    # 1. 화면(Table) 업데이트
+                    self.table.item(row, col).setText(new_full_text)
+
+                    # 2. DataFrame 업데이트
+                    # (DataFrame 컬럼명 찾기)
+                    target_col = col_name  # 보통 헤더 이름 그대로 씀
+                    self.current_df.at[row, target_col] = new_full_text
+
+                    # 3. 엑셀 파일 저장
+                    if self.current_file:
+                        self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
+                        self.log.appendPlainText(f"[문구 수정 저장] 행 {row + 1} 업데이트 완료.")
+
+                except PermissionError:
+                    QtWidgets.QMessageBox.critical(self, "저장 실패", "엑셀 파일이 열려있습니다. 닫고 다시 시도해주세요.")
+                except Exception as e:
+                    QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류: {e}")
+
+            # 다이얼로그에 '원본 텍스트', '송장타입', '저장함수' 전달
+            dlg = CopyLinesDialog(cell_text, invoice_type, save_modified_text, self)
+            dlg.exec_()
             return
-
-        invoice_type = self.combo_type.currentText()
-
-        if invoice_type == "네이버 송장":
-            lines = self._parse_naver_lines(cell_text)
-        else:
-            lines = self._parse_coupang_lines(cell_text)
-
-        if not lines:
-            self.log.appendPlainText("※ 파싱된 문구가 없습니다. 패턴을 한 번 확인해 주세요.")
-            return
-
-        dlg = CopyLinesDialog(lines, self)
-        dlg.exec_()
 
     def on_table_selection_changed(self):
         selected = self.table.selectionModel().selectedRows()
@@ -1006,6 +1189,61 @@ class ReadInvoiceWidget(QWidget):
         self.lbl_img_preview.setPixmap(scaled)
         self.lbl_img_name.setText(fname)
 
+
+    def on_click_memo(self):
+        """메모 버튼 클릭 시 실행"""
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            QtWidgets.QMessageBox.information(self, "알림", "메모를 작성할 행을 선택해주세요.")
+            return
+
+        # 첫 번째 선택된 행에 대해서만 메모 창을 엽니다.
+        row_idx = selected_rows[0].row()
+        self._open_memo_dialog(row_idx)
+
+    def _open_memo_dialog(self, row_idx: int):
+        """메모 창을 띄우고 저장 시 엑셀에 반영"""
+        if self.current_df is None or not self.current_file:
+            return
+
+        # 1. 현재 메모 내용 가져오기
+        col_idx = self._col_index.get("메모")
+        if col_idx is None:
+            QtWidgets.QMessageBox.warning(self, "오류", "'메모' 컬럼을 찾을 수 없습니다.")
+            return
+
+        current_item = self.table.item(row_idx, col_idx)
+        current_text = current_item.text() if current_item else ""
+
+        # 2. 다이얼로그 띄우기
+        dlg = MemoDialog(current_text, self)
+        if dlg.exec_() == QDialog.Accepted:
+            new_text = dlg.get_text()
+
+            # 3. 변경사항 반영 (화면 + 데이터프레임 + 엑셀파일)
+            try:
+                # (1) 화면 업데이트
+                if current_item:
+                    current_item.setText(new_text)
+                else:
+                    self.table.setItem(row_idx, col_idx, QTableWidgetItem(new_text))
+
+                # (2) DataFrame 업데이트
+                # '메모' 컬럼이 없으면 생성
+                if "메모" not in self.current_df.columns:
+                    self.current_df.insert(0, "메모", "")
+
+                self.current_df.at[row_idx, "메모"] = new_text
+
+                # (3) 엑셀 파일 저장
+                self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
+                self.log.appendPlainText(f"[메모 저장] 행 {row_idx + 1}: {new_text}")
+
+            except PermissionError:
+                QtWidgets.QMessageBox.critical(self, "저장 실패",
+                                               "엑셀 파일이 열려 있어 저장할 수 없습니다.\n파일을 닫고 다시 시도해주세요.")
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류 발생: {e}")
 
 # ----------------------------------------------------------------------
 # 단독 실행 테스트용
