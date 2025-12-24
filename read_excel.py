@@ -1,7 +1,7 @@
 # read_excel.py
 # 네이버·쿠팡 송장 엑셀을 읽어와서 보여주고,
 # 품목명 파싱, 복사용 문구 COPY, 사진 첨부/삭제/재사용,
-# 문자 전송 UI 뼈대까지 포함한 탭 위젯.
+# 문자 전송 UI 뼈대 및 검색/폰트조절/취소선 기능을 포함한 탭 위젯.
 
 import os
 import re
@@ -32,18 +32,13 @@ from PyQt5.QtWidgets import (
     QGroupBox,
     QDateTimeEdit,
     QCheckBox,
+    QSpinBox,
 )
 
 
 # ----------------------------------------------------------------------
 # COPY 다이얼로그: 파싱된 문구들 + 각 줄별 COPY 버튼
 # ----------------------------------------------------------------------
-
-
-
-# (기존 import 문에 QScrollArea가 없다면 추가해야 하지만,
-# 아래 코드처럼 QtWidgets.QScrollArea로 쓰면 import 수정 안 해도 됩니다.)
-
 class CopyLinesDialog(QDialog):
     def __init__(self, full_text: str, invoice_type: str, save_callback, parent=None):
         super().__init__(parent)
@@ -149,10 +144,6 @@ class CopyLinesDialog(QDialog):
         core = ""
 
         # 1) 앞부분(Prefix) 잘라내기
-        # 네이버: "1. 품목명" -> "1. " + "품목명"
-        # 쿠팡: "1. 옵션: 품목명" -> "1. 옵션: " + "품목명" (대략적)
-
-        # 편의상 기존 로직을 활용해 'core' 텍스트를 먼저 찾습니다.
         temp_core = ""
         if invoice_type == "네이버 송장":
             body = s.split(".", 1)[1].lstrip()  # "1." 떼고 나머지
@@ -176,7 +167,6 @@ class CopyLinesDialog(QDialog):
             return None
 
         # 2) 원본 문자열에서 temp_core의 위치를 찾아서 정확히 3등분
-        # (주의: temp_core가 여러 번 나올 수 있으나, 보통 구조상 한 번 나옴. 첫 번째로 처리)
         start_idx = line.find(temp_core)
         if start_idx == -1:
             return None
@@ -242,6 +232,8 @@ class CopyLinesDialog(QDialog):
             sender.setText("✔ 완료")
 
         self.lbl_last.setText(f"마지막 복사: {text}")
+
+
 # ----------------------------------------------------------------------
 # 메모기능
 # ----------------------------------------------------------------------
@@ -276,16 +268,18 @@ class MemoDialog(QDialog):
 
     def get_text(self):
         return self.txt_memo.toPlainText()
+
+
 # ----------------------------------------------------------------------
 # 이미지 관리 다이얼로그: 행별 여러 장 추가/삭제/미리보기
 # ----------------------------------------------------------------------
 class ImageManageDialog(QDialog):
     def __init__(
-        self,
-        parent,
-        row_id: int,
-        image_dir: Path,
-        current_files: List[str],
+            self,
+            parent,
+            row_id: int,
+            image_dir: Path,
+            current_files: List[str],
     ):
         super().__init__(parent)
 
@@ -324,7 +318,7 @@ class ImageManageDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
         self.btn_add = QPushButton("+ 추가")
-        self.btn_primary = QPushButton("대표로")   # ✅ 대표 이미지로 올리기
+        self.btn_primary = QPushButton("대표로")  # ✅ 대표 이미지로 올리기
         self.btn_del = QPushButton("- 삭제")
         self.btn_close = QPushButton("닫기")
 
@@ -457,15 +451,22 @@ class ImageManageDialog(QDialog):
         self._reload_list()
 
 
-
 # ----------------------------------------------------------------------
-# [추가] 색상 혼합을 위한 전용 페인트공 (Delegate)
+# [추가] 색상 혼합을 위한 전용 페인트공 (Delegate) + [개선] 취소선 기능 추가
 # ----------------------------------------------------------------------
 class BlendDelegate(QtWidgets.QStyledItemDelegate):
     def paint(self, painter, option, index):
         # 1. 먼저 "선택되지 않은 척"하고 원래 배경(노랑/흰색)과 글자를 그립니다.
         opt = QtWidgets.QStyleOptionViewItem(option)
         opt.state &= ~QtWidgets.QStyle.State_Selected
+
+        # [NEW] 취소선 확인 (UserRole + 2 에 True가 있으면 취소선)
+        is_strike = index.data(Qt.UserRole + 2)
+        if is_strike:
+            font = opt.font
+            font.setStrikeOut(True)
+            opt.font = font
+
         super().paint(painter, opt, index)
 
         # 2. 만약 실제로 "선택된 상태"라면, 그 위에 반투명한 파란색을 덧칠합니다.
@@ -476,6 +477,7 @@ class BlendDelegate(QtWidgets.QStyledItemDelegate):
             color = QtGui.QColor(0, 120, 215, 100)
             painter.fillRect(option.rect, color)
             painter.restore()
+
 
 # ----------------------------------------------------------------------
 # 메인 탭 위젯
@@ -498,6 +500,20 @@ class ReadInvoiceWidget(QWidget):
 
         self._col_index: Dict[str, int] = {}
         self._current_row_idx: Optional[int] = None
+
+        # [요청 1] 원하는 컬럼 순서 지정 (여기에 없는 컬럼은 필터링됨)
+        # 사진은 로직상 맨 뒤에 자동으로 붙습니다.
+        self.target_columns = [
+            "주문일시",
+            "특기사항",
+            "받으시는 분",
+            "구매자명",
+            "구매자연락처",
+            "품목명",
+            "메모",
+            "작업유무",
+            "문자발송처리"  # [요청] 이 순서로
+        ]
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(14, 14, 14, 14)
@@ -534,16 +550,40 @@ class ReadInvoiceWidget(QWidget):
         self.table.setObjectName("ship_table")
 
         self.table.setItemDelegate(BlendDelegate(self.table))
-        
+
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
         self.table.setWordWrap(True)
         main_layout.addWidget(self.table, 1)
 
-        self.btn_complete = QPushButton("▼ 선택된 주문 '작업 완료' 체크 (노란색 표시)")
+        # -------------------------
+        # [NEW] 하단 기능 패널 (글자크기 / 검색 / 작업완료 / 문자발송)
+        # -------------------------
+        # 배치 순서:
+        # [글자크기 조절] ... [입력칸][검색버튼] [작업완료버튼] [문자발송처리버튼]
+        control_layout = QHBoxLayout()
+        control_layout.setSpacing(10)
+
+        # 1. 글자 크기 조절
+        lbl_font = QLabel("글자크기:")
+        self.spin_font = QSpinBox()
+        self.spin_font.setRange(8, 30)
+        self.spin_font.setValue(10)  # 기본값
+        self.spin_font.valueChanged.connect(self.on_font_size_changed)
+
+        # 2. 검색 기능
+        self.le_search = QLineEdit()
+        self.le_search.setPlaceholderText("검색어 입력...")
+        self.le_search.setFixedWidth(150)
+        self.le_search.returnPressed.connect(self.on_click_search)  # 엔터키 지원
+
+        self.btn_search = QPushButton("🔍 검색")
+        self.btn_search.clicked.connect(self.on_click_search)
+
+        # 3. 작업 완료 버튼
+        self.btn_complete = QPushButton("▼ 선택된 주문 '작업 완료' 체크 (노란색)")
         self.btn_complete.setFixedHeight(30)
-        # 배경색(#FFB6C1 = 연한 핑크), 글자색(black), 굵게
         self.btn_complete.setStyleSheet("""
                     QPushButton {
                         font-weight: bold;
@@ -556,16 +596,34 @@ class ReadInvoiceWidget(QWidget):
                     }
                 """)
         self.btn_complete.clicked.connect(self.on_click_complete)
-        main_layout.addWidget(self.btn_complete)
 
-        # ============================================================
-        # [추가됨] 메모 작성 버튼
-        # ============================================================
-        # self.btn_memo = QPushButton("📝 선택된 주문 '메모' 작성/수정")
-        # self.btn_memo.setFixedHeight(30)
-        # self.btn_memo.clicked.connect(self.on_click_memo)
-        # main_layout.addWidget(self.btn_memo)
-        # ============================================================
+        # 4. [NEW] 문자 발송 처리 버튼
+        self.btn_sms_done = QPushButton("📩 문자 발송 처리 (취소선)")
+        self.btn_sms_done.setFixedHeight(30)
+        self.btn_sms_done.setStyleSheet("""
+                    QPushButton {
+                        font-weight: bold;
+                        background-color: #ADD8E6; 
+                        border: 1px solid #87CEEB;
+                        border-radius: 4px;
+                    }
+                    QPushButton:hover {
+                        background-color: #87CEFA;
+                    }
+                """)
+        self.btn_sms_done.clicked.connect(self.on_click_sms_done)
+
+        # 레이아웃 배치
+        control_layout.addWidget(lbl_font)
+        control_layout.addWidget(self.spin_font)
+        control_layout.addStretch(1)  # 빈 공간 채우기
+        control_layout.addWidget(self.le_search)  # [6,7] 검색 입력칸 왼쪽, 검색 버튼 왼쪽
+        control_layout.addWidget(self.btn_search)
+        control_layout.addSpacing(10)
+        control_layout.addWidget(self.btn_complete)  # 완료 버튼
+        control_layout.addWidget(self.btn_sms_done)  # [5] 완료 버튼 오른쪽
+
+        main_layout.addLayout(control_layout)
 
         # ============================================================
         # [추가됨] 문자 전송 패널 토글 버튼
@@ -726,6 +784,72 @@ class ReadInvoiceWidget(QWidget):
     # ------------------------------------------------------------------
     # UI 핸들러
     # ------------------------------------------------------------------
+
+    # [3] 글자 크기 변경 핸들러
+    def on_font_size_changed(self, val):
+        self.table.setStyleSheet(f"font-size: {val}pt;")
+        self.table.resizeRowsToContents()
+        self.table.resizeColumnsToContents()
+
+    # [2] 검색 핸들러
+    def on_click_search(self):
+        keyword = self.le_search.text().strip()
+        row_count = self.table.rowCount()
+        col_count = self.table.columnCount()
+
+        if not keyword:
+            # 검색어 없으면 전체 보이기
+            for r in range(row_count):
+                self.table.setRowHidden(r, False)
+            return
+
+        # 검색 수행
+        for r in range(row_count):
+            match_found = False
+            for c in range(col_count):
+                item = self.table.item(r, c)
+                if item and keyword.lower() in item.text().lower():
+                    match_found = True
+                    break
+            self.table.setRowHidden(r, not match_found)
+
+    # [4,5] 문자 발송 처리 핸들러 (취소선)
+    def on_click_sms_done(self):
+        if self.current_df is None or not self.current_file:
+            return
+
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            QtWidgets.QMessageBox.information(self, "알림", "처리할 행을 선택해주세요.")
+            return
+
+        # 컬럼 확인
+        if "문자발송처리" not in self.current_df.columns:
+            self.current_df["문자발송처리"] = ""
+
+        try:
+            for idx in selected_rows:
+                visual_r = idx.row()
+                real_r = self.table.item(visual_r, 0).data(Qt.UserRole)
+
+                # 데이터 업데이트
+                self.current_df.at[real_r, "문자발송처리"] = "완료"
+
+                # UI 업데이트 (취소선 플래그 UserRole+2)
+                for c in range(self.table.columnCount()):
+                    item = self.table.item(visual_r, c)
+                    if item:
+                        item.setData(Qt.UserRole + 2, True)
+
+            # 저장
+            self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
+            self.log.appendPlainText(f"[문자발송] {len(selected_rows)}건 처리 완료 (취소선 적용).")
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류: {e}")
+
+        self.table.clearSelection()
+
     def on_click_open(self):
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -747,6 +871,10 @@ class ReadInvoiceWidget(QWidget):
                 df = self._load_coupang_invoice(file_path)
 
             df = self._add_item_count_column(df, invoice_type)
+
+            # [1] 컬럼 순서 및 표준화 (요청사항 적용)
+            df = self._standardize_columns(df, invoice_type)
+
             self.current_df = df
 
             self._setup_image_store()
@@ -766,6 +894,46 @@ class ReadInvoiceWidget(QWidget):
         except (OSError, IOError, ValueError) as e:
             QtWidgets.QMessageBox.critical(self, "엑셀 읽기 오류", str(e))
             self.log.appendPlainText(f"[오류] 엑셀을 읽는 중 문제가 발생했습니다: {e}")
+
+    def _standardize_columns(self, df: pd.DataFrame, invoice_type: str) -> pd.DataFrame:
+        """
+        네이버/쿠팡의 다양한 컬럼명을 표준 컬럼명으로 변경하고,
+        요청하신 'target_columns' 순서대로 정렬 및 없는 컬럼 생성
+        """
+        # 1. 컬럼 매핑 (원본 -> 타겟)
+        rename_map = {}
+        if invoice_type == "네이버 송장":
+            rename_map = {
+                "상품명": "품목명",
+                "수취인명": "받으시는 분",
+                "수취인연락처1": "받으시는 분 전화",
+                "배송메세지": "특기사항",
+                "옵션정보": "메모",  # 기존 로직상
+            }
+        else:  # 쿠팡
+            rename_map = {
+                "등록옵션명": "품목명",
+                "상품옵션명": "품목명",  # 둘 중 하나
+                "수취인이름": "받으시는 분",
+                "수취인전화번호": "받으시는 분 전화",
+                "배송메세지": "특기사항",
+                "주문자 추가메시지": "메모",
+            }
+
+        # 실제로 존재하는 컬럼만 rename
+        actual_rename = {k: v for k, v in rename_map.items() if k in df.columns}
+        df.rename(columns=actual_rename, inplace=True)
+
+        # 2. 필요한 컬럼이 없으면 생성
+        for col in self.target_columns:
+            if col not in df.columns:
+                df[col] = ""
+
+        # 3. 값 문자열 변환 (NaN 방지)
+        for col in df.columns:
+            df[col] = df[col].fillna("").astype(str)
+
+        return df
 
     def on_item_double_clicked(self, item: QTableWidgetItem):
         if self.current_df is None:
@@ -818,9 +986,12 @@ class ReadInvoiceWidget(QWidget):
             self._clear_preview()
             return
 
-        row_idx = selected[0].row()
-        self._current_row_idx = row_idx
-        self._update_sms_panel_for_row(row_idx)
+        # visual -> real mapping
+        visual_row = selected[0].row()
+        real_row = self.table.item(visual_row, 0).data(Qt.UserRole)
+
+        self._current_row_idx = real_row
+        self._update_sms_panel_for_row(real_row)
 
     def on_click_complete(self):
         if self.current_df is None or not self.current_file:
@@ -865,8 +1036,8 @@ class ReadInvoiceWidget(QWidget):
                         it.setBackground(target_color)
 
                 # 사진 버튼 색상 변경
-                photo_col_idx = self._col_index.get("사진")
-                if photo_col_idx:
+                if "사진" in self._col_index:
+                    photo_col_idx = self._col_index.get("사진")
                     widget = self.table.cellWidget(visual_r, photo_col_idx)
                     if widget:
                         bg_style = "background-color: #ffffaa;" if not is_already_done else ""
@@ -934,7 +1105,7 @@ class ReadInvoiceWidget(QWidget):
 
         # [추가] 빈 칸(NaN)을 숫자로 착각하지 않도록, 문자열(object)로 강제 변환
         # 이렇게 하면 '메모'나 '작업유무'에 글자를 넣어도 경고가 안 뜹니다.
-        for col in ["작업유무", "메모"]:
+        for col in ["작업유무", "메모", "문자발송처리"]:
             if col in df.columns:
                 df[col] = df[col].astype(object)
 
@@ -945,7 +1116,7 @@ class ReadInvoiceWidget(QWidget):
         df = pd.read_excel(file_path)
 
         # [추가] 쿠팡도 똑같이 처리
-        for col in ["작업유무", "메모"]:
+        for col in ["작업유무", "메모", "문자발송처리"]:
             if col in df.columns:
                 df[col] = df[col].astype(object)
 
@@ -999,33 +1170,31 @@ class ReadInvoiceWidget(QWidget):
         self.table.setSortingEnabled(False)
         self.table.clear()
 
-        cols = list(df.columns)
+        # [수정] target_columns 기준으로 컬럼 필터링
+        display_cols = [c for c in self.target_columns if c in df.columns]
+        # 사진 컬럼은 UI 전용이므로 맨 뒤에 추가
         photo_col_name = "사진"
-        cols_with_photo = cols + [photo_col_name]
+        full_cols = display_cols + [photo_col_name]
 
-        row_count = len(df)
-        col_count = len(cols_with_photo)
+        self.table.setColumnCount(len(full_cols))
+        self.table.setRowCount(len(df))
+        self.table.setHorizontalHeaderLabels(full_cols)
 
-        self.table.setColumnCount(col_count)
-        self.table.setRowCount(row_count)
-        self.table.setHorizontalHeaderLabels([str(c) for c in cols_with_photo])
-
-        self._col_index = {name: idx for idx, name in enumerate(cols_with_photo)}
+        self._col_index = {name: idx for idx, name in enumerate(full_cols)}
 
         done_bg = QtGui.QColor(255, 255, 100)  # 노란색
 
-        for row_idx in range(row_count):
+        for row_idx in range(len(df)):
             # 작업유무 확인
-            is_done = False
-            if "작업유무" in df.columns:
-                val = str(df.iloc[row_idx]["작업유무"]).strip()
-                if val == "완료":
-                    is_done = True
+            work_status = str(df.iloc[row_idx].get("작업유무", "")).strip()
+            sms_status = str(df.iloc[row_idx].get("문자발송처리", "")).strip()
 
-            for col_idx, col_name in enumerate(cols):
-                val = df.iloc[row_idx, col_idx]
-                text = "" if pd.isna(val) else str(val)
-                item = QTableWidgetItem(text)
+            is_done = (work_status == "완료")
+            is_sms_done = (sms_status == "완료")
+
+            for col_idx, col_name in enumerate(display_cols):
+                val = df.iloc[row_idx][col_name]
+                item = QTableWidgetItem(str(val))
 
                 # [★핵심] 0번 컬럼(맨 앞칸)에 '진짜 데이터 번호(row_idx)'를 숨겨둡니다!
                 # 화면이 뒤섞여도 이 값은 변하지 않습니다.
@@ -1036,9 +1205,13 @@ class ReadInvoiceWidget(QWidget):
                 if is_done:
                     item.setBackground(done_bg)
 
+                # 문자발송 완료시 취소선 (Delegate에서 처리)
+                if is_sms_done:
+                    item.setData(Qt.UserRole + 2, True)
+
                 # 툴팁 등 기존 옵션
                 if col_name in ("품목명", "상품명"):
-                    item.setToolTip(text)
+                    item.setToolTip(str(val))
 
                 self.table.setItem(row_idx, col_idx, item)
 
@@ -1064,6 +1237,7 @@ class ReadInvoiceWidget(QWidget):
     def _make_photo_button_handler(self, row_idx: int):
         def handler():
             self._open_image_manager(row_idx)
+
         return handler
 
     def _open_image_manager(self, row_idx: int):
@@ -1095,15 +1269,20 @@ class ReadInvoiceWidget(QWidget):
             return
 
         for row_idx in range(self.table.rowCount()):
+            # 정렬 상태일 땐 row_idx가 뒤죽박죽이므로 real index를 찾아야 함
+            item_0 = self.table.item(row_idx, 0)
+            if not item_0: continue
+
+            real_row = item_0.data(Qt.UserRole)
+            row_id = real_row + 1
+
             widget = self.table.cellWidget(row_idx, photo_col_idx)
-            if not isinstance(widget, QPushButton):
-                continue
-            row_id = row_idx + 1
-            count = len(self._image_map.get(row_id, []))
-            widget.setText(f"사진({count}장)…")
+            if isinstance(widget, QPushButton):
+                count = len(self._image_map.get(row_id, []))
+                widget.setText(f"사진({count}장)…")
 
     # ------------------------------------------------------------------
-    # 로그 출력
+    # 로그 출력 (복구됨: 상세 컬럼 리스트)
     # ------------------------------------------------------------------
     def _log_columns(self, df: pd.DataFrame, invoice_type: str, file_path: str):
         self.log.appendPlainText(
@@ -1161,7 +1340,7 @@ class ReadInvoiceWidget(QWidget):
     # "문구개수" 컬럼 자동 추가
     # ------------------------------------------------------------------
     def _add_item_count_column(
-        self, df: pd.DataFrame, invoice_type: str
+            self, df: pd.DataFrame, invoice_type: str
     ) -> pd.DataFrame:
         col_key = None
         for cand in ("품목명", "상품명"):
@@ -1197,10 +1376,15 @@ class ReadInvoiceWidget(QWidget):
         col_idx = self._col_index.get(col_name)
         if col_idx is None:
             return ""
-        item = self.table.item(row_idx, col_idx)
-        return "" if item is None else item.text()
+        # 주의: row_idx는 visual row가 아니라 real row여야 함 (DataFrame 접근용)
+        # 하지만 여기서 row_idx는 호출하는 쪽에서 무엇을 넘기냐에 따라 다름.
+        # 이 함수는 DataFrame 접근용이므로 real_row_idx를 받아야 합니다.
+        if self.current_df is None: return ""
+        val = self.current_df.iloc[row_idx][col_name]
+        return "" if pd.isna(val) else str(val)
 
     def _update_sms_panel_for_row(self, row_idx: int):
+        # row_idx는 real index
         name = self._get_cell_text(row_idx, "받으시는 분")
         phone = self._get_cell_text(row_idx, "받으시는 분 전화")
         cnt = self._get_cell_text(row_idx, "문구개수") or "-"
@@ -1214,6 +1398,7 @@ class ReadInvoiceWidget(QWidget):
         self.lbl_img_name.setText("")
 
     def _update_preview_for_row(self, row_idx: int):
+        # row_idx = real index
         if not self._image_dir:
             self._clear_preview()
             return
@@ -1243,7 +1428,6 @@ class ReadInvoiceWidget(QWidget):
         self.lbl_img_preview.setPixmap(scaled)
         self.lbl_img_name.setText(fname)
 
-
     def on_click_memo(self):
         """메모 버튼 클릭 시 실행"""
         selected_rows = self.table.selectionModel().selectedRows()
@@ -1252,8 +1436,10 @@ class ReadInvoiceWidget(QWidget):
             return
 
         # 첫 번째 선택된 행에 대해서만 메모 창을 엽니다.
-        row_idx = selected_rows[0].row()
-        self._open_memo_dialog(row_idx)
+        # visual row
+        visual_row = selected_rows[0].row()
+        real_row = self.table.item(visual_row, 0).data(Qt.UserRole)
+        self._open_memo_dialog(visual_row, real_row)
 
     # [수정] 인자를 (visual_row, real_row) 두 개 받도록 변경
     def _open_memo_dialog(self, visual_row: int, real_row: int):
@@ -1296,8 +1482,9 @@ class ReadInvoiceWidget(QWidget):
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류: {e}")
 
-    
-
+    # ------------------------------------------------------------------
+    # 대시보드 업데이트 (복구됨: 상세 로직)
+    # ------------------------------------------------------------------
     def _update_dashboard_counts(self):
         """
         [가운데 창] 업데이트:
@@ -1337,7 +1524,7 @@ class ReadInvoiceWidget(QWidget):
                 if is_done:
                     completed_rows += 1
 
-                # 2. 각인 글자 수 카운트 (행별 합산)
+                # 2. 각인 글자 수 카운트 (행별 합산) - 여기가 삭제됐던 핵심 로직
                 row_gagin = 0
                 for kw in self._target_fonts:
                     row_gagin += item_name.count(kw)
