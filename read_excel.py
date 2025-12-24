@@ -9,7 +9,7 @@ import json
 import shutil
 from pathlib import Path
 from typing import Optional, List, Dict
-
+import subprocess
 import pandas as pd
 from PyQt5 import QtWidgets, QtGui
 from PyQt5.QtCore import Qt, QDateTime, QTimer
@@ -335,18 +335,14 @@ class MemoDialog(QDialog):
 # ----------------------------------------------------------------------
 # 이미지 관리 다이얼로그: 행별 여러 장 추가/삭제/미리보기
 # ----------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# [업데이트] 이미지 관리 다이얼로그 (ADB로 폰 사진 가져오기 추가)
+# ----------------------------------------------------------------------
 class ImageManageDialog(QDialog):
-    def __init__(
-            self,
-            parent,
-            row_id: int,
-            image_dir: Path,
-            current_files: List[str],
-    ):
+    def __init__(self, parent, row_id: int, image_dir: Path, current_files: List[str]):
         super().__init__(parent)
-
         self.setWindowTitle(f"사진 관리 - 행 {row_id}")
-        self.resize(600, 400)
+        self.resize(600, 450)
 
         self.row_id = row_id
         self.image_dir = image_dir
@@ -354,15 +350,14 @@ class ImageManageDialog(QDialog):
 
         main_layout = QVBoxLayout(self)
 
+        # 상단 리스트 + 미리보기 영역
         top_layout = QHBoxLayout()
         main_layout.addLayout(top_layout)
 
-        # 좌측: 리스트
         self.list_widget = QListWidget()
         self.list_widget.currentRowChanged.connect(self._on_list_selection_changed)
         top_layout.addWidget(self.list_widget, 2)
 
-        # 우측: 미리보기
         right_layout = QVBoxLayout()
         top_layout.addLayout(right_layout, 3)
 
@@ -373,15 +368,29 @@ class ImageManageDialog(QDialog):
         right_layout.addWidget(self.lbl_preview)
 
         self.lbl_filename = QLabel("")
+        self.lbl_filename.setWordWrap(True)
         right_layout.addWidget(self.lbl_filename)
 
-        # 하단 버튼들
-        btn_layout = QHBoxLayout()
-        main_layout.addLayout(btn_layout)
+        # ---------------------------------------------------------
+        # [NEW] 스마트폰 연동 버튼 구역
+        # ---------------------------------------------------------
+        adb_box = QGroupBox("스마트폰(ADB) 연동")
+        adb_layout = QHBoxLayout(adb_box)
 
-        self.btn_add = QPushButton("+ 추가")
-        self.btn_primary = QPushButton("대표로")  # ✅ 대표 이미지로 올리기
-        self.btn_del = QPushButton("- 삭제")
+        self.btn_adb_latest = QPushButton("📷 방금 찍은 최신 사진 가져오기")
+        self.btn_adb_latest.setStyleSheet("background-color: #fff0f6; color: #d6336c; font-weight: bold;")
+        self.btn_adb_latest.clicked.connect(self._on_adb_import_latest)
+
+        adb_layout.addWidget(self.btn_adb_latest)
+        main_layout.addWidget(adb_box)
+
+        # ---------------------------------------------------------
+        # 기본 버튼 구역
+        # ---------------------------------------------------------
+        btn_layout = QHBoxLayout()
+        self.btn_add = QPushButton("+ PC에서 파일찾기")
+        self.btn_primary = QPushButton("대표로 지정")
+        self.btn_del = QPushButton("삭제")
         self.btn_close = QPushButton("닫기")
 
         btn_layout.addWidget(self.btn_add)
@@ -390,43 +399,37 @@ class ImageManageDialog(QDialog):
         btn_layout.addStretch(1)
         btn_layout.addWidget(self.btn_close)
 
+        main_layout.addLayout(btn_layout)
+
         self.btn_add.clicked.connect(self._on_add)
         self.btn_primary.clicked.connect(self._on_set_primary)
         self.btn_del.clicked.connect(self._on_del)
         self.btn_close.clicked.connect(self.accept)
 
-        # 초기 리스트 로드
         self._reload_list()
 
-    # 외부에서 결과 조회용
     def images(self) -> List[str]:
         return list(self._images)
 
-    # 리스트 갱신
     def _reload_list(self):
         self.list_widget.clear()
-
         for fname in self._images:
             item = QListWidgetItem(fname)
             fpath = self.image_dir / fname
             if fpath.is_file():
                 pix = QtGui.QPixmap(str(fpath))
                 if not pix.isNull():
-                    icon = QtGui.QIcon(
-                        pix.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                    )
+                    icon = QtGui.QIcon(pix.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
                     item.setIcon(icon)
             self.list_widget.addItem(item)
 
         if self._images:
-            # 항상 첫 번째 항목을 선택 상태로
             self.list_widget.setCurrentRow(0)
         else:
             self.lbl_preview.setText("미리보기 없음")
             self.lbl_preview.setPixmap(QtGui.QPixmap())
             self.lbl_filename.setText("")
 
-    # 리스트 선택 변경 시 미리보기 갱신
     def _on_list_selection_changed(self, row: int):
         if row < 0 or row >= len(self._images):
             self.lbl_preview.setText("미리보기 없음")
@@ -438,78 +441,111 @@ class ImageManageDialog(QDialog):
         fpath = self.image_dir / fname
         if not fpath.is_file():
             self.lbl_preview.setText("파일 없음")
-            self.lbl_preview.setPixmap(QtGui.QPixmap())
             self.lbl_filename.setText(fname)
             return
 
         pix = QtGui.QPixmap(str(fpath))
-        if pix.isNull():
-            self.lbl_preview.setText("이미지 로드 실패")
-            self.lbl_preview.setPixmap(QtGui.QPixmap())
-            self.lbl_filename.setText(fname)
-            return
-
-        scaled = pix.scaled(
-            self.lbl_preview.size(),
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation,
-        )
+        scaled = pix.scaled(self.lbl_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.lbl_preview.setPixmap(scaled)
         self.lbl_filename.setText(fname)
 
-    # 이미지 추가
     def _on_add(self):
-        src_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "첨부할 이미지 선택",
-            str(self.image_dir),
-            "Images (*.png *.jpg *.jpeg *.bmp *.gif);;All Files (*.*)",
-        )
-        if not src_path:
-            return
+        src_path, _ = QFileDialog.getOpenFileName(self, "이미지 선택", "", "Images (*.jpg *.png *.jpeg *.bmp)")
+        if src_path:
+            self._save_local_image(Path(src_path))
 
-        src = Path(src_path)
-        ext = src.suffix.lower() or ".png"
+    def _save_local_image(self, src_path: Path):
+        try:
+            ext = src_path.suffix.lower()
+            if not ext: ext = ".jpg"
 
-        next_idx = len(self._images) + 1
-        new_name = f"row_{self.row_id:04d}_{next_idx}{ext}"
+            # 파일명 생성 (row_0001_1.jpg)
+            next_idx = len(self._images) + 1
+            new_name = f"row_{self.row_id:04d}_{next_idx}{ext}"
+
+            self.image_dir.mkdir(parents=True, exist_ok=True)
+            target = self.image_dir / new_name
+            target.write_bytes(src_path.read_bytes())
+
+            self._images.append(new_name)
+            self._reload_list()
+            # 방금 추가한 것을 선택
+            self.list_widget.setCurrentRow(len(self._images) - 1)
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "오류", str(e))
+
+    # [핵심] ADB로 최신 사진 가져오기
+    def _on_adb_import_latest(self):
+        import subprocess
 
         try:
+            # 1. 폰의 카메라 폴더(DCIM/Camera)에서 날짜순 정렬(-t)하여 가장 최신 파일 1개만 조회
+            # 안드로이드 표준 경로: /sdcard/DCIM/Camera/
+            cmd_ls = ["adb", "shell", "ls", "-t", "/sdcard/DCIM/Camera/"]
+
+            # process 실행
+            proc = subprocess.Popen(cmd_ls, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = proc.communicate()
+
+            if proc.returncode != 0:
+                QtWidgets.QMessageBox.warning(self, "연동 실패", "폰이 연결되지 않았거나 권한이 없습니다.\nUSB 디버깅을 확인해주세요.")
+                return
+
+            # 결과 파싱 (파일명들 중 jpg/png만 필터링)
+            files = out.decode("utf-8").splitlines()
+            target_file = None
+            for f in files:
+                f = f.strip()
+                if f.lower().endswith(('.jpg', '.jpeg', '.png')):
+                    target_file = f
+                    break
+
+            if not target_file:
+                QtWidgets.QMessageBox.information(self, "알림", "최신 사진을 찾을 수 없습니다.")
+                return
+
+            # 2. 파일 가져오기 (adb pull)
+            phone_path = f"/sdcard/DCIM/Camera/{target_file}"
+
+            # 임시 경로에 다운로드
+            temp_path = self.image_dir / f"temp_{target_file}"
             self.image_dir.mkdir(parents=True, exist_ok=True)
-            (self.image_dir / new_name).write_bytes(src.read_bytes())
-        except (OSError, IOError) as e:
-            QtWidgets.QMessageBox.critical(self, "복사 실패", str(e))
-            return
 
-        self._images.append(new_name)
-        self._reload_list()
+            cmd_pull = ["adb", "pull", phone_path, str(temp_path)]
+            subprocess.run(cmd_pull, check=True)
 
-    # ✅ 선택한 이미지를 "대표"로: 리스트 맨 앞으로 이동
+            # 3. 정식 등록 (이름 변경 및 리스트 추가)
+            self._save_local_image(temp_path)
+
+            # 임시 파일 삭제
+            if temp_path.exists():
+                temp_path.unlink()
+
+            QtWidgets.QMessageBox.information(self, "성공", "휴대폰의 최신 사진을 가져왔습니다!")
+
+        except FileNotFoundError:
+            QtWidgets.QMessageBox.critical(self, "오류", "adb.exe가 없습니다.")
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "오류", f"사진 가져오기 실패: {e}")
+
     def _on_set_primary(self):
         row = self.list_widget.currentRow()
-        if row <= 0 or row >= len(self._images):
-            # 0 이하면 이미 대표거나 선택 없음
-            return
-
+        if row <= 0: return
         fname = self._images.pop(row)
         self._images.insert(0, fname)
         self._reload_list()
-        self.list_widget.setCurrentRow(0)  # 대표 선택 상태로 유지
+        self.list_widget.setCurrentRow(0)
 
-    # 이미지 삭제
     def _on_del(self):
         row = self.list_widget.currentRow()
-        if row < 0 or row >= len(self._images):
-            return
-
+        if row < 0: return
         fname = self._images.pop(row)
         fpath = self.image_dir / fname
         try:
-            if fpath.is_file():
-                fpath.unlink()
-        except (OSError, IOError):
+            if fpath.is_file(): fpath.unlink()
+        except:
             pass
-
         self._reload_list()
 
 
@@ -1137,28 +1173,106 @@ class ReadInvoiceWidget(QWidget):
         self._update_dashboard_counts()
 
     # ------------------------------------------------------------------
-    # 문자 전송 버튼 (현재는 로그만 남김)
+    # [수정] 문자 전송: '받으시는 분' -> '구매자'로 변경
     # ------------------------------------------------------------------
     def on_send_selected(self):
+        """선택된 한 명에게 문자 보내기 (ADB)"""
         if self._current_row_idx is None:
             QtWidgets.QMessageBox.information(self, "알림", "선택된 고객이 없습니다.")
             return
 
-        name = self._get_cell_text(self._current_row_idx, "받으시는 분")
-        phone = self._get_cell_text(self._current_row_idx, "받으시는 분 전화")
-        invoice_type = self.combo_type.currentText()
-        row_id = self._current_row_idx + 1
-        img_count = len(self._image_map.get(row_id, []))
+        # [수정] 받으시는 분 -> 구매자명 / 전화 -> 구매자연락처
+        name = self._get_cell_text(self._current_row_idx, "구매자명")
+        phone = self._get_cell_text(self._current_row_idx, "구매자연락처")
+        item_name = self._get_cell_text(self._current_row_idx, "품목명")
 
-        when = (
-            "지금"
-            if self.chk_send_now.isChecked()
-            else self.dt_send.dateTime().toString("yyyy-MM-dd HH:mm")
+        clean_phone = phone.replace("-", "").replace(" ", "").strip()
+
+        if not clean_phone:
+            QtWidgets.QMessageBox.warning(self, "오류", "구매자 전화번호가 없습니다.")
+            return
+
+        # 메시지 내용
+        message = f"[하비브라운] {name}님, 주문하신 상품이 완성되어 안내 드립니다."
+
+        self._send_via_adb(clean_phone, message)
+
+    def on_send_all(self):
+        """표시된 전체 고객에게 일괄 보내기 (ADB)"""
+        row_count = self.table.rowCount()
+        if row_count == 0:
+            QtWidgets.QMessageBox.information(self, "알림", "표시된 고객이 없습니다.")
+            return
+
+        reply = QtWidgets.QMessageBox.question(
+            self, "전체 발송",
+            f"현재 목록에 있는 {row_count}명(구매자)에게 순차적으로 문자를 보낼까요?\n"
+            "(휴대폰 화면이 계속 바뀝니다)",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
         )
-        self.log.appendPlainText(
-            f"[테스트] [{invoice_type}] 선택 고객 문자 전송 예정: "
-            f"{name}({phone}), 행={row_id}, 이미지={img_count}장, 시간={when}"
-        )
+        if reply == QtWidgets.QMessageBox.No:
+            return
+
+        for row in range(row_count):
+            real_row = self.table.item(row, 0).data(Qt.UserRole)
+
+            # [수정] 받으시는 분 -> 구매자명 / 전화 -> 구매자연락처
+            name = self._get_cell_text(real_row, "구매자명")
+            phone = self._get_cell_text(real_row, "구매자연락처")
+            item_name = self._get_cell_text(real_row, "품목명")
+
+            clean_phone = phone.replace("-", "").replace(" ", "").strip()
+            if not clean_phone: continue
+
+            message = f"[하비브라운] {name}님, 주문하신 상품이 완성되어 안내 드립니다."
+
+            self._send_via_adb(clean_phone, message)
+
+            # 폰 성능에 따라 대기시간 조절 (기본 1.5초)
+            import PyQt5.QtTest as QTest
+            QTest.QTest.qWait(1500)
+
+        self.log.appendPlainText(f"[전체발송] {row_count}건 명령 전달 완료.")
+
+    # ------------------------------------------------------------------
+    # [추가] 실제 ADB 명령 수행 함수
+    # ------------------------------------------------------------------
+    def _send_via_adb(self, phone_no: str, msg: str):
+        """
+        ADB로 문자 창을 띄우고, '엔터키'를 입력하여 전송까지 시도합니다.
+        ※ 필수: 휴대폰 문자 설정에서 [엔터키로 메시지 전송] 옵션을 켜야 합니다.
+        """
+        import subprocess
+        import time
+
+        try:
+            self.log.appendPlainText(f"[ADB] {phone_no}에게 전송 시도...")
+
+            # 1. 문자 앱 실행 및 내용 입력
+            cmd = [
+                "adb", "shell", "am", "start",
+                "-a", "android.intent.action.SENDTO",
+                "-d", f"sms:{phone_no}",
+                "--es", "sms_body", msg
+            ]
+            subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            # 2. 앱이 뜰 때까지 잠깐 대기 (폰 성능에 따라 조절, 0.5~1초)
+            # QTest.qWait는 GUI용이라 여기서 쓰면 꼬일 수 있으니 time.sleep 사용 권장
+            time.sleep(0.8)
+
+            # 3. 엔터키(66) 입력 -> 전송 버튼 누름 효과
+            # (혹시 모르니 2번 누르게 설정: 포커스 잡기 -> 전송)
+            subprocess.Popen("adb shell input keyevent 66", shell=True)
+            time.sleep(0.3)
+            subprocess.Popen("adb shell input keyevent 66", shell=True)
+
+            # 4. (옵션) 뒤로가기 키(4)를 눌러서 목록으로 빠져나오기 (다음 발송을 위해)
+            # time.sleep(0.5)
+            # subprocess.Popen("adb shell input keyevent 4", shell=True)
+
+        except Exception as e:
+            self.log.appendPlainText(f"[오류] ADB 실패: {e}")
 
     def on_send_all(self):
         row_count = self.table.rowCount()
