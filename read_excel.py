@@ -35,6 +35,24 @@ from PyQt5.QtWidgets import (
     QSpinBox,
 )
 # ----------------------------------------------------------------------
+# 캐시 무시하고 이미지 불러오는 헬퍼 함수 추가
+# ----------------------------------------------------------------------
+def load_pixmap_clean(path: str) -> QtGui.QPixmap:
+    """
+    파일 경로(path)에서 바이너리를 직접 읽어 QPixmap을 생성합니다.
+    Qt의 내부 캐싱(같은 파일명일 때 이전 이미지 보여주는 문제)을 방지합니다.
+    """
+    p = Path(path)
+    if not p.is_file():
+        return QtGui.QPixmap()
+
+    with open(p, "rb") as f:
+        data = f.read()
+
+    pix = QtGui.QPixmap()
+    pix.loadFromData(data)
+    return pix
+# ----------------------------------------------------------------------
 # 전체 문구 수정용 다이얼로그 클래스
 # ----------------------------------------------------------------------
 class FullTextEditDialog(QDialog):
@@ -333,9 +351,6 @@ class MemoDialog(QDialog):
 
 
 # ----------------------------------------------------------------------
-# 이미지 관리 다이얼로그: 행별 여러 장 추가/삭제/미리보기
-# ----------------------------------------------------------------------
-# ----------------------------------------------------------------------
 # [업데이트] 이미지 관리 다이얼로그 (ADB로 폰 사진 가져오기 추가)
 # ----------------------------------------------------------------------
 class ImageManageDialog(QDialog):
@@ -416,11 +431,13 @@ class ImageManageDialog(QDialog):
         for fname in self._images:
             item = QListWidgetItem(fname)
             fpath = self.image_dir / fname
-            if fpath.is_file():
-                pix = QtGui.QPixmap(str(fpath))
-                if not pix.isNull():
-                    icon = QtGui.QIcon(pix.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-                    item.setIcon(icon)
+
+            # [수정] 캐시 무시하고 로드
+            pix = load_pixmap_clean(str(fpath))
+
+            if not pix.isNull():
+                icon = QtGui.QIcon(pix.scaled(64, 64, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                item.setIcon(icon)
             self.list_widget.addItem(item)
 
         if self._images:
@@ -439,12 +456,15 @@ class ImageManageDialog(QDialog):
 
         fname = self._images[row]
         fpath = self.image_dir / fname
-        if not fpath.is_file():
-            self.lbl_preview.setText("파일 없음")
+
+        # [수정] 캐시 무시하고 로드
+        pix = load_pixmap_clean(str(fpath))
+
+        if pix.isNull():
+            self.lbl_preview.setText("파일 읽기 실패")
             self.lbl_filename.setText(fname)
             return
 
-        pix = QtGui.QPixmap(str(fpath))
         scaled = pix.scaled(self.lbl_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
         self.lbl_preview.setPixmap(scaled)
         self.lbl_filename.setText(fname)
@@ -852,6 +872,9 @@ class ReadInvoiceWidget(QWidget):
         self.lbl_img_preview.setAlignment(Qt.AlignCenter)
         self.lbl_img_preview.setFixedSize(150, 150)
 
+        self.lbl_img_preview.setCursor(Qt.PointingHandCursor)  # 마우스 올리면 손가락 모양
+        self.lbl_img_preview.mousePressEvent = self._on_preview_clicked  # 클릭하면 관리창 열기
+
         self.lbl_img_name = QLabel("")
         right_box.addWidget(self.lbl_img_preview)
         right_box.addWidget(self.lbl_img_name)
@@ -1239,40 +1262,55 @@ class ReadInvoiceWidget(QWidget):
     # ------------------------------------------------------------------
     def _send_via_adb(self, phone_no: str, msg: str):
         """
-        ADB로 문자 창을 띄우고, '엔터키'를 입력하여 전송까지 시도합니다.
-        ※ 필수: 휴대폰 문자 설정에서 [엔터키로 메시지 전송] 옵션을 켜야 합니다.
+        ADB로 문자 전송 명령을 내리고, 결과를 로그에 출력합니다.
+        (수정: 문자 내용에 공백이 있어도 끊기지 않도록 따옴표 처리 추가)
         """
         import subprocess
         import time
 
+        self.log.appendPlainText(f"[ADB] {phone_no}에게 전송 시도 중...")
+
         try:
-            self.log.appendPlainText(f"[ADB] {phone_no}에게 전송 시도...")
+            # [핵심 수정] 메시지 앞뒤에 따옴표(")를 붙여서 한 덩어리로 인식시킴
+            # 윈도우 cmd와 안드로이드 shell 사이에서 공백이 잘리지 않게 함
+            safe_msg = f'"{msg}"'
 
             # 1. 문자 앱 실행 및 내용 입력
             cmd = [
                 "adb", "shell", "am", "start",
                 "-a", "android.intent.action.SENDTO",
                 "-d", f"sms:{phone_no}",
-                "--es", "sms_body", msg
+                "--es", "sms_body", safe_msg
             ]
-            subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-            # 2. 앱이 뜰 때까지 잠깐 대기 (폰 성능에 따라 조절, 0.5~1초)
-            # QTest.qWait는 GUI용이라 여기서 쓰면 꼬일 수 있으니 time.sleep 사용 권장
-            time.sleep(0.8)
+            # 명령 실행 (CREATE_NO_WINDOW 옵션은 필요시 추가)
+            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out, err = proc.communicate()
 
-            # 3. 엔터키(66) 입력 -> 전송 버튼 누름 효과
-            # (혹시 모르니 2번 누르게 설정: 포커스 잡기 -> 전송)
-            subprocess.Popen("adb shell input keyevent 66", shell=True)
-            time.sleep(0.3)
-            subprocess.Popen("adb shell input keyevent 66", shell=True)
+            # 결과 확인
+            if proc.returncode == 0:
+                # 에러 메시지 디코딩 (한글 윈도우는 cp949)
+                err_msg = err.decode('cp949', errors='ignore').strip()
 
-            # 4. (옵션) 뒤로가기 키(4)를 눌러서 목록으로 빠져나오기 (다음 발송을 위해)
-            # time.sleep(0.5)
-            # subprocess.Popen("adb shell input keyevent 4", shell=True)
+                # 'Error'나 'Exception' 문구가 있으면 실패로 간주
+                if "error" in err_msg.lower() or "exception" in err_msg.lower():
+                    self.log.appendPlainText(f"❌ 실패 (오류 발생): {err_msg}")
+                    return
+
+                # 성공 시 엔터키 입력 (전송 버튼 누름 효과)
+                time.sleep(0.5)
+                subprocess.Popen("adb shell input keyevent 66", shell=True)
+                time.sleep(0.3)
+                subprocess.Popen("adb shell input keyevent 66", shell=True)
+
+                self.log.appendPlainText(f"✅ 명령 전달 성공!")
+
+            else:
+                err_msg = err.decode('cp949', errors='ignore')
+                self.log.appendPlainText(f"❌ 전송 실패: {err_msg}")
 
         except Exception as e:
-            self.log.appendPlainText(f"[오류] ADB 실패: {e}")
+            self.log.appendPlainText(f"❌ 오류 발생: {e}")
 
     def on_send_all(self):
         row_count = self.table.rowCount()
@@ -1606,15 +1644,14 @@ class ReadInvoiceWidget(QWidget):
 
         fname = files[0]
         fpath = self._image_dir / fname
-        if not fpath.is_file():
-            self._clear_preview()
-            return
 
-        pix = QtGui.QPixmap(str(fpath))
+        # [수정] 캐시 무시하고 로드 (여기서도 중요!)
+        pix = load_pixmap_clean(str(fpath))
+
         if pix.isNull():
             self._clear_preview()
             return
-        # noinspection PyUnresolvedReferences
+
         scaled = pix.scaled(
             self.lbl_img_preview.size(),
             Qt.KeepAspectRatio,
@@ -1768,7 +1805,70 @@ class ReadInvoiceWidget(QWidget):
         )
         self.info_dash_time.setPlainText(text_time)
 
+    # ------------------------------------------------------------------
+    # [추가] 이미지 클릭 시 사진 관리창 열기
+    # ------------------------------------------------------------------
+    def _on_preview_clicked(self, event):
+        """이미지 라벨 클릭 시 실행: 현재 선택된 줄의 사진 관리창을 엽니다."""
 
+        # 1. 현재 테이블에서 선택된 줄이 있는지 확인
+        selected_rows = self.table.selectionModel().selectedRows()
+        if not selected_rows:
+            QtWidgets.QMessageBox.information(self, "알림", "먼저 목록에서 고객을 선택해주세요.")
+            return
+
+        # 2. 눈에 보이는 줄 번호 (Visual Row)
+        visual_row = selected_rows[0].row()
+
+        # 3. [핵심] 섞여도 변하지 않는 '진짜 엑셀 번호' (Real Row) 꺼내기
+        real_row = self.table.item(visual_row, 0).data(Qt.UserRole)
+
+        # 4. 관리창 열기
+        self._open_image_manage_dialog(real_row)
+
+    # [수정] 이미지 클릭 시 열리는 관리창 로직을 대폭 수정하여 동기화 문제 해결
+    def _open_image_manage_dialog(self, real_row: int):
+        """사진 관리창 열기 및 저장 처리"""
+        if not self._image_dir:
+            QtWidgets.QMessageBox.information(self, "알림", "이미지 저장 경로가 설정되지 않았습니다.")
+            return
+
+        # [핵심 수정] current_df가 아닌 _image_map(최신 상태)을 사용해야 함
+        row_id = real_row + 1
+        current_files = self._image_map.get(row_id, [])
+
+        # 2. 다이얼로그 열기
+        dlg = ImageManageDialog(self, row_id, self._image_dir, current_files)
+
+        if dlg.exec_() == QDialog.Accepted:
+            # 3. 변경된 내용 저장
+            new_files = dlg.images()
+
+            # (A) 메모리 데이터(_image_map) 갱신
+            if new_files:
+                self._image_map[row_id] = new_files
+            else:
+                self._image_map.pop(row_id, None)
+
+            # (B) meta.json 저장 (사진 관리의 핵심)
+            self._save_image_meta()
+
+            # (C) 엑셀 데이터프레임에도 문자열로 기록 (선택 사항이나 싱크 맞추기용)
+            if "이미지" not in self.current_df.columns:
+                self.current_df["이미지"] = ""
+            self.current_df.at[real_row, "이미지"] = ",".join(new_files)
+
+            # (D) 엑셀 파일 저장
+            if self.current_file:
+                try:
+                    self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
+                    self.log.appendPlainText(f"[사진] 행 {row_id} 변경사항 저장 완료.")
+                except Exception as e:
+                    self.log.appendPlainText(f"[오류] 엑셀 저장 실패: {e}")
+
+            # (E) [핵심] 화면 갱신 (미리보기 사진 + 테이블 버튼 글자)
+            self._update_preview_for_row(real_row)
+            self._refresh_photo_buttons()
 # ----------------------------------------------------------------------
 # 단독 실행 테스트용
 # ----------------------------------------------------------------------
