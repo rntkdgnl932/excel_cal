@@ -34,7 +34,51 @@ from PyQt5.QtWidgets import (
     QCheckBox,
     QSpinBox,
 )
+# ----------------------------------------------------------------------
+# 전체 문구 수정용 다이얼로그 클래스
+# ----------------------------------------------------------------------
+class FullTextEditDialog(QDialog):
+    """전체 문구를 통째로 수정하는 다이얼로그"""
 
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("전체 문구 수정")
+        self.resize(500, 600)
+
+        layout = QVBoxLayout(self)
+
+        # 안내 문구
+        lbl_info = QLabel("문구 전체를 수정하세요. [완료]를 누르면 리스트가 갱신됩니다.")
+        layout.addWidget(lbl_info)
+
+        # 텍스트 에디트 (여러 줄 입력 가능)
+        self.txt_edit = QPlainTextEdit()
+        self.txt_edit.setPlainText(text)
+        layout.addWidget(self.txt_edit)
+
+        # 버튼
+        btn_layout = QHBoxLayout()
+        btn_save = QPushButton("완료")
+        btn_cancel = QPushButton("취소")
+
+        btn_save.setFixedHeight(40)
+        btn_save.setStyleSheet("background-color: #4dabf7; color: white; font-weight: bold;")
+
+        btn_save.clicked.connect(self.accept)
+        btn_cancel.clicked.connect(self.reject)
+
+        btn_layout.addStretch(1)
+        btn_layout.addWidget(btn_save)
+        btn_layout.addWidget(btn_cancel)
+
+        layout.addLayout(btn_layout)
+
+    def get_text(self):
+        return self.txt_edit.toPlainText()
+
+# ----------------------------------------------------------------------
+# COPY 다이얼로그: 파싱된 문구들 + 각 줄별 COPY 버튼
+# ----------------------------------------------------------------------
 
 # ----------------------------------------------------------------------
 # COPY 다이얼로그: 파싱된 문구들 + 각 줄별 COPY 버튼
@@ -43,20 +87,76 @@ class CopyLinesDialog(QDialog):
     def __init__(self, full_text: str, invoice_type: str, save_callback, parent=None):
         super().__init__(parent)
         self.setWindowTitle("문구 복사 & 수정")
-        self.resize(650, 500)
+        self.resize(650, 600)
 
-        self.save_callback = save_callback  # 저장 시 호출할 함수 (엑셀 반영용)
-        self.raw_lines = full_text.splitlines()  # 원본 줄들 (보존용)
-        self.parsed_items = []  # 화면에 표시할 파싱된 데이터
+        self.save_callback = save_callback  # 엑셀 저장 콜백
+        self.invoice_type = invoice_type  # 송장 타입 (네이버/쿠팡)
+        self.raw_lines = full_text.splitlines()  # 원본 줄 데이터
 
-        # ---------------------------------------------------------
-        # 1. 문구 파싱 (수정 시 재조립을 위해 앞/뒤 문맥까지 분리)
-        # ---------------------------------------------------------
+        # 메인 레이아웃
+        self.main_layout = QVBoxLayout(self)
+
+        # 1. 상단 영역 (안내문구 + 전체수정 버튼)
+        top_layout = QHBoxLayout()
+
+        info_layout = QVBoxLayout()
+        info = QLabel("개별 [수정] 또는 우측 [전체 수정]을 이용하세요.")
+        self.lbl_last = QLabel("마지막 복사: 없음")
+        self.lbl_last.setStyleSheet("color: blue; font-weight: bold;")
+        info_layout.addWidget(info)
+        info_layout.addWidget(self.lbl_last)
+
+        # [NEW] 전체 수정 버튼
+        self.btn_edit_all = QPushButton("전체 문구 수정")
+        self.btn_edit_all.setFixedSize(120, 40)
+        self.btn_edit_all.setStyleSheet("background-color: #69db7c; color: white; font-weight: bold;")
+        self.btn_edit_all.clicked.connect(self.on_click_edit_all)
+
+        top_layout.addLayout(info_layout)
+        top_layout.addStretch(1)
+        top_layout.addWidget(self.btn_edit_all)
+
+        self.main_layout.addLayout(top_layout)
+
+        # 2. 스크롤 영역 (리스트가 들어갈 곳)
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
+
+        # 컨텐츠 위젯과 레이아웃 초기화
+        self.content_widget = QWidget()
+        self.content_layout = QVBoxLayout(self.content_widget)
+        self.scroll_area.setWidget(self.content_widget)
+
+        self.main_layout.addWidget(self.scroll_area, 1)
+
+        # 3. 하단 닫기 버튼
+        btn_close = QPushButton("닫기")
+        btn_close.clicked.connect(self.accept)
+        self.main_layout.addWidget(btn_close)
+
+        # 4. 초기 리스트 그리기
+        self._refresh_list_ui()
+
+    def _refresh_list_ui(self):
+        """현재 self.raw_lines를 기반으로 화면을 다시 그립니다."""
+        # 기존 아이템들 삭제 (레이아웃 청소)
+        while self.content_layout.count():
+            child = self.content_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+            elif child.layout():
+                # 레이아웃이 중첩된 경우 처리 (안전장치)
+                import sip
+                sip.delete(child)
+
+        self.parsed_items = []
+        self._ui_rows = []
+
+        # 다시 파싱
         for idx, line in enumerate(self.raw_lines):
-            # 파싱 로직을 여기로 가져옴
-            parts = self._parse_structure(line, invoice_type)
+            parts = self._parse_structure(line, self.invoice_type)
             if parts:
-                # parts = (prefix, core, suffix)
                 self.parsed_items.append({
                     "line_idx": idx,
                     "prefix": parts[0],
@@ -64,55 +164,27 @@ class CopyLinesDialog(QDialog):
                     "suffix": parts[2]
                 })
 
-        # ---------------------------------------------------------
-        # 2. UI 구성
-        # ---------------------------------------------------------
-        main_layout = QVBoxLayout(self)
-
-        # 상단 안내
-        top_layout = QVBoxLayout()
-        info = QLabel("문구를 [수정] 후 [저장]하면 엑셀에도 반영됩니다.")
-        self.lbl_last = QLabel("마지막 복사: 없음")
-        self.lbl_last.setStyleSheet("color: blue; font-weight: bold;")
-        top_layout.addWidget(info)
-        top_layout.addWidget(self.lbl_last)
-        main_layout.addLayout(top_layout)
-
-        # 스크롤 영역
-        scroll_area = QtWidgets.QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
-
-        content_widget = QWidget()
-        content_layout = QVBoxLayout(content_widget)
-
-        self._ui_rows = []  # (edit, btn_edit, btn_copy, item_data) 저장용
-
+        # 다시 그리기
         for item in self.parsed_items:
             row_layout = QHBoxLayout()
 
-            # 텍스트 입력창
             edit = QLineEdit()
             edit.setText(item["core"])
             edit.setReadOnly(True)
             edit.setStyleSheet("background-color: #f0f0f0; color: #333;")
 
-            # 수정/저장 버튼
             btn_edit = QPushButton("수정")
             btn_edit.setFixedWidth(60)
 
-            # 복사 버튼
             btn_copy = QPushButton("COPY")
             btn_copy.setFixedWidth(70)
 
-            # 핸들러 연결
-            # 주의: 루프 변수 캡처를 위해 별도 메서드로 연결
             self._connect_handlers(edit, btn_edit, btn_copy, item)
 
             row_layout.addWidget(edit, 1)
             row_layout.addWidget(btn_edit)
             row_layout.addWidget(btn_copy)
-            content_layout.addLayout(row_layout)
+            self.content_layout.addLayout(row_layout)
 
             self._ui_rows.append({
                 "edit": edit,
@@ -120,33 +192,39 @@ class CopyLinesDialog(QDialog):
                 "btn_copy": btn_copy
             })
 
-        content_layout.addStretch(1)
-        content_widget.setLayout(content_layout)
-        scroll_area.setWidget(content_widget)
-        main_layout.addWidget(scroll_area, 1)
+        self.content_layout.addStretch(1)
 
-        # 닫기 버튼
-        btn_close = QPushButton("닫기")
-        btn_close.clicked.connect(self.accept)
-        main_layout.addWidget(btn_close)
+    def on_click_edit_all(self):
+        """[전체 문구 수정] 버튼 클릭 핸들러"""
+        # 현재 줄들을 합쳐서 전체 텍스트로 만듦
+        full_text = "\n".join(self.raw_lines)
+
+        # 새 다이얼로그 띄우기
+        dlg = FullTextEditDialog(full_text, self)
+        if dlg.exec_() == QDialog.Accepted:
+            new_text = dlg.get_text()
+
+            # 1. 엑셀 및 데이터 저장
+            self.save_callback(new_text)
+
+            # 2. 내부 데이터 업데이트
+            self.raw_lines = new_text.splitlines()
+
+            # 3. 리스트 UI 새로고침 (재파싱)
+            self._refresh_list_ui()
+
+            # 로그/알림
+            self.lbl_last.setText("마지막 작업: 전체 수정 완료")
 
     def _parse_structure(self, line: str, invoice_type: str):
-        """
-        한 줄을 (접두어, 핵심문구, 접미어)로 분리합니다.
-        분해 실패 시(패턴 불일치) None 반환.
-        """
+        """(기존 로직 유지) 한 줄을 (접두어, 핵심문구, 접미어)로 분리"""
         s = line.strip()
-        # 공통: 숫자+점(1.) 으로 시작하는지 확인
         if not re.match(r"^\d+\.", s):
             return None
 
-        # 핵심 문구 추출 로직 (기존과 동일하되 위치를 찾음)
-        core = ""
-
-        # 1) 앞부분(Prefix) 잘라내기
         temp_core = ""
         if invoice_type == "네이버 송장":
-            body = s.split(".", 1)[1].lstrip()  # "1." 떼고 나머지
+            body = s.split(".", 1)[1].lstrip()
             idx = body.find("/ 각인체")
             if idx != -1:
                 temp_core = body[:idx].strip()
@@ -154,7 +232,7 @@ class CopyLinesDialog(QDialog):
                 temp_core = body.split("=>", 1)[0].strip()
             else:
                 temp_core = body.strip()
-        else:  # 쿠팡
+        else:
             body = s
             if ":" in body:
                 body = body.split(":", 1)[1]
@@ -166,53 +244,41 @@ class CopyLinesDialog(QDialog):
         if not temp_core:
             return None
 
-        # 2) 원본 문자열에서 temp_core의 위치를 찾아서 정확히 3등분
         start_idx = line.find(temp_core)
         if start_idx == -1:
             return None
 
         prefix = line[:start_idx]
         suffix = line[start_idx + len(temp_core):]
-
         return (prefix, temp_core, suffix)
 
     def _connect_handlers(self, edit, btn_edit, btn_copy, item_data):
-        # 수정/저장 버튼 로직
+        """(기존 로직 유지) 개별 줄 수정/복사 핸들러"""
+
         def on_edit_click():
             if btn_edit.text() == "수정":
-                # 수정 모드 진입
                 edit.setReadOnly(False)
                 edit.setFocus()
                 edit.setStyleSheet("background-color: #ffffff; color: #000; border: 2px solid #4dabf7;")
                 btn_edit.setText("저장")
                 btn_edit.setStyleSheet("color: blue; font-weight: bold;")
-                # 저장 모드일 땐 복사 비활성화 (선택)
                 btn_copy.setEnabled(False)
             else:
-                # 저장 로직 수행
+                # 개별 저장
                 new_text = edit.text()
-
-                # 1. 데이터 업데이트 (메모리)
                 item_data["core"] = new_text
-
-                # 2. 원본 라인 재조립
                 new_line = item_data["prefix"] + new_text + item_data["suffix"]
                 self.raw_lines[item_data["line_idx"]] = new_line
 
-                # 3. 전체 텍스트 합치기
                 new_full_text = "\n".join(self.raw_lines)
-
-                # 4. 부모창(Widget)에 저장 요청!
                 self.save_callback(new_full_text)
 
-                # UI 복귀
                 edit.setReadOnly(True)
                 edit.setStyleSheet("background-color: #f0f0f0; color: #333;")
                 btn_edit.setText("수정")
                 btn_edit.setStyleSheet("")
                 btn_copy.setEnabled(True)
 
-        # 복사 버튼 로직
         def on_copy_click():
             text = edit.text()
             QApplication.clipboard().setText(text)
@@ -222,15 +288,11 @@ class CopyLinesDialog(QDialog):
         btn_copy.clicked.connect(on_copy_click)
 
     def _mark_copied(self, text: str):
-        # 모든 버튼 'COPY'로 초기화
         for row in self._ui_rows:
             row["btn_copy"].setText("COPY")
-
-        # 현재 누른 버튼 찾아서 '완료' 표시 (sender 이용하거나 해서)
         sender = self.sender()
         if sender:
             sender.setText("✔ 완료")
-
         self.lbl_last.setText(f"마지막 복사: {text}")
 
 
@@ -815,36 +877,52 @@ class ReadInvoiceWidget(QWidget):
 
     # [4,5] 문자 발송 처리 핸들러 (취소선)
     def on_click_sms_done(self):
-        if self.current_df is None or not self.current_file:
-            return
+        """선택된 행 문자발송처리 토글 (완료/취소선 <-> 해제)"""
+        if self.current_df is None or not self.current_file: return
 
         selected_rows = self.table.selectionModel().selectedRows()
         if not selected_rows:
             QtWidgets.QMessageBox.information(self, "알림", "처리할 행을 선택해주세요.")
             return
 
-        # 컬럼 확인
         if "문자발송처리" not in self.current_df.columns:
             self.current_df["문자발송처리"] = ""
 
         try:
+            # 첫 번째 행 상태를 보고 '완료'할지 '해제'할지 결정
+            first_vis = selected_rows[0].row()
+            first_real = self.table.item(first_vis, 0).data(Qt.UserRole)
+            current_val = str(self.current_df.at[first_real, "문자발송처리"]).strip()
+
+            is_already_done = (current_val == "완료")
+
+            # 목표: 이미 완료면 -> 빈값(해제), 아니면 -> 완료
+            target_val = "" if is_already_done else "완료"
+            target_strike = False if is_already_done else True
+
             for idx in selected_rows:
                 visual_r = idx.row()
                 real_r = self.table.item(visual_r, 0).data(Qt.UserRole)
 
-                # 데이터 업데이트
-                self.current_df.at[real_r, "문자발송처리"] = "완료"
+                # 데이터 변경
+                self.current_df.at[real_r, "문자발송처리"] = target_val
 
-                # UI 업데이트 (취소선 플래그 UserRole+2)
+                # [핵심] 화면 취소선 그리기/지우기
                 for c in range(self.table.columnCount()):
                     item = self.table.item(visual_r, c)
                     if item:
-                        item.setData(Qt.UserRole + 2, True)
+                        item.setData(Qt.UserRole + 2, target_strike)
 
-            # 저장
             self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
-            self.log.appendPlainText(f"[문자발송] {len(selected_rows)}건 처리 완료 (취소선 적용).")
 
+            action = "취소(해제)" if is_already_done else "완료(취소선)"
+            self.log.appendPlainText(f"[문자발송] {len(selected_rows)}건 {action} 처리됨.")
+
+            # 화면 갱신
+            self.table.repaint()
+
+        except PermissionError:
+            QtWidgets.QMessageBox.critical(self, "저장 실패", "엑셀 파일이 열려있습니다.")
         except Exception as e:
             QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류: {e}")
 
@@ -936,41 +1014,44 @@ class ReadInvoiceWidget(QWidget):
         return df
 
     def on_item_double_clicked(self, item: QTableWidgetItem):
-        if self.current_df is None:
-            return
+        if self.current_df is None: return
 
         visual_row = item.row()
-        col = item.column()
-
-        # [★핵심] 진짜 인덱스 꺼내오기
         real_row = self.table.item(visual_row, 0).data(Qt.UserRole)
-
+        col = item.column()
         header = self.table.horizontalHeaderItem(col)
-        col_name = header.text() if header is not None else ""
+        col_name = header.text() if header else ""
 
         # 1. 메모 수정
         if col_name == "메모":
-            # 화면갱신용(visual)과 저장용(real) 둘 다 넘깁니다.
             self._open_memo_dialog(visual_row, real_row)
             return
 
-        # 2. 품목명/상품명 수정
+        # 2. 품목명 수정
         if col_name in ("품목명", "상품명"):
             cell_text = item.text()
             invoice_type = self.combo_type.currentText()
 
             def save_modified_text(new_full_text: str):
                 try:
-                    # 화면 업데이트 (보이는 곳)
+                    # [1] 화면 글자 즉시 변경
                     item.setText(new_full_text)
+                    item.setToolTip(new_full_text)  # 툴팁도 갱신
 
-                    # 데이터프레임 업데이트 (진짜 위치)
+                    # [2] 데이터 업데이트
                     self.current_df.at[real_row, col_name] = new_full_text
 
-                    # 파일 저장
+                    # [3] 파일 저장
                     if self.current_file:
                         self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
-                        self.log.appendPlainText(f"[수정] 행 {real_row + 1} 문구 업데이트.")
+                        self.log.appendPlainText(f"[수정] 행 {real_row + 1} 문구 업데이트 완료.")
+
+                    # [★핵심 해결책] 내용이 길어졌으니 행 높이를 늘려라! (이게 없어서 ...으로 뜸)
+                    self.table.resizeRowsToContents()
+                    self.table.viewport().update()
+
+                except PermissionError:
+                    QtWidgets.QMessageBox.critical(self, "저장 실패", "엑셀 파일이 열려있습니다.")
                 except Exception as e:
                     QtWidgets.QMessageBox.critical(self, "오류", str(e))
 
@@ -1443,42 +1524,37 @@ class ReadInvoiceWidget(QWidget):
 
     # [수정] 인자를 (visual_row, real_row) 두 개 받도록 변경
     def _open_memo_dialog(self, visual_row: int, real_row: int):
-        if self.current_df is None or not self.current_file:
-            return
-
-        # 1. 현재 메모 내용 가져오기 (화면 기준)
+        if self.current_df is None or not self.current_file: return
         col_idx = self._col_index.get("메모")
-        if col_idx is None:
-            QtWidgets.QMessageBox.warning(self, "오류", "'메모' 컬럼이 없습니다.")
-            return
+        if col_idx is None: return
 
         current_item = self.table.item(visual_row, col_idx)
         current_text = current_item.text() if current_item else ""
 
-        # 2. 다이얼로그 띄우기
         dlg = MemoDialog(current_text, self)
         if dlg.exec_() == QDialog.Accepted:
             new_text = dlg.get_text()
-
             try:
-                # (1) 화면 업데이트 (visual_row 사용)
+                # [핵심] 화면 텍스트 즉시 변경
                 if current_item:
                     current_item.setText(new_text)
                 else:
                     self.table.setItem(visual_row, col_idx, QTableWidgetItem(new_text))
 
-                # (2) DataFrame 업데이트 (real_row 사용 - ★여기가 핵심)
+                # 데이터 업데이트
                 if "메모" not in self.current_df.columns:
                     self.current_df.insert(0, "메모", "")
-
                 self.current_df.at[real_row, "메모"] = new_text
 
-                # (3) 엑셀 파일 저장
+                # 파일 저장
                 self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
                 self.log.appendPlainText(f"[메모 저장] 행 {real_row + 1}: {new_text}")
 
+                # 화면 강제 갱신
+                self.table.repaint()
+
             except PermissionError:
-                QtWidgets.QMessageBox.critical(self, "저장 실패", "엑셀이 열려있습니다.")
+                QtWidgets.QMessageBox.critical(self, "저장 실패", "엑셀 파일이 열려있습니다.")
             except Exception as e:
                 QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류: {e}")
 
