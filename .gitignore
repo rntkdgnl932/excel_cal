@@ -11,3 +11,5 @@ THIRD_PARTY_NOTICES
 out/
 secrets/
 log/
+module/schedule_data.json
+module/holiday_data.json
