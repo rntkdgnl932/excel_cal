@@ -2,6 +2,12 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 import sys
+sys.path.append('C:/my_games/excel_cal/module')
+
+venv_path = os.path.join(os.getcwd(), ".venv", "Lib", "site-packages")
+if os.path.exists(venv_path) and venv_path not in sys.path:
+    sys.path.insert(0, venv_path)
+
 import traceback
 from pathlib import Path
 import importlib.util
@@ -17,7 +23,6 @@ import msoffcrypto
 import io
 from PyQt5.QtWidgets import QFileDialog # 파일 탐색기
 from PyQt5.QtTest import QTest # 대기(wait)용
-
 
 import re
 from pathlib import Path
@@ -65,6 +70,38 @@ from openpyxl.cell.cell import MergedCell
 from openpyxl.cell.cell import MergedCell as _MC
 from openpyxl.styles import Alignment, Border, Side
 from openpyxl.worksheet.worksheet import Worksheet
+
+# --- PyInstaller 강제 인식을 위한 더미 임포트 구역 ---
+import google_auth_oauthlib
+import google_auth_oauthlib.flow
+import googleapiclient.discovery
+import google.oauth2.credentials
+import pydrive.auth
+import pydrive.drive
+import pandas
+import openpyxl
+import wsgiref
+import wsgiref.simple_server
+import google_auth_oauthlib
+import google_auth_oauthlib.flow
+import googleapiclient.discovery
+import pydrive.auth
+import pydrive.drive
+import pandas
+import openpyxl
+# --- 데이터베이스 및 유틸리티 ---
+import sqlite3      # DB 조작 필수
+import threading    # 백그라운드 비동기 작업 필수
+import logging      # 에러 및 상태 로깅 필수
+import csv          # 근무 기록 내보내기용
+
+# --- 외부 연동 및 동기화 ---
+import git          # 시스템 업데이트(GitHub 연동) 필수
+from pydrive.auth import GoogleAuth      # 구글 인증
+from pydrive.drive import GoogleDrive    # 구글 드라이브 조작
+
+# --- PyQt5 세부 신호 (비동기 처리 시 필수) ---
+from PyQt5.QtCore import pyqtSignal, pyqtSlot # 커스텀 신호 전달용
 # --
 ##################################################################################
 
