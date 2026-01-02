@@ -769,8 +769,7 @@ class ReadInvoiceWidget(QWidget):
         self._col_index: Dict[str, int] = {}
         self._current_row_idx: Optional[int] = None
 
-        # [요청 1] 원하는 컬럼 순서 지정 (여기에 없는 컬럼은 필터링됨)
-        # 사진은 로직상 맨 뒤에 자동으로 붙습니다.
+        # [요청 1] 원하는 컬럼 순서 지정
         self.target_columns = [
             "주문일시",
             "특기사항",
@@ -780,7 +779,7 @@ class ReadInvoiceWidget(QWidget):
             "품목명",
             "메모",
             "작업유무",
-            "문자발송처리"  # [요청] 이 순서로
+            "문자발송처리"
         ]
 
         main_layout = QVBoxLayout(self)
@@ -800,6 +799,13 @@ class ReadInvoiceWidget(QWidget):
         self.combo_type = QComboBox()
         self.combo_type.addItems(["네이버 송장", "쿠팡 송장"])
         self.lbl_file = QLabel("선택된 파일: (없음)")
+
+        # [필터] 엑셀 불러오기 버튼 앞
+        self.combo_filter = QComboBox()
+        self.combo_filter.addItems(["전체", "작업중", "작업완료", "문자발송완료"])
+        # [핵심] 필터 변경 시 즉시 목록 갱신
+        self.combo_filter.currentIndexChanged.connect(self._apply_filter)
+
         self.btn_open = QPushButton("엑셀 불러오기")
 
         top_layout.addWidget(lbl_type)
@@ -807,6 +813,9 @@ class ReadInvoiceWidget(QWidget):
         top_layout.addSpacing(14)
         top_layout.addWidget(self.lbl_file, 1)
         top_layout.addSpacing(14)
+
+        top_layout.addWidget(self.combo_filter)
+        top_layout.addSpacing(10)
         top_layout.addWidget(self.btn_open)
 
         main_layout.addWidget(top_wrap)
@@ -816,9 +825,7 @@ class ReadInvoiceWidget(QWidget):
         # -------------------------
         self.table = QTableWidget()
         self.table.setObjectName("ship_table")
-
         self.table.setItemDelegate(BlendDelegate(self.table))
-
         self.table.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.table.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.table.setAlternatingRowColors(True)
@@ -826,25 +833,23 @@ class ReadInvoiceWidget(QWidget):
         main_layout.addWidget(self.table, 1)
 
         # -------------------------
-        # [NEW] 하단 기능 패널 (글자크기 / 검색 / 작업완료 / 문자발송)
+        # 하단 기능 패널
         # -------------------------
-        # 배치 순서:
-        # [글자크기 조절] ... [입력칸][검색버튼] [작업완료버튼] [문자발송처리버튼]
         control_layout = QHBoxLayout()
         control_layout.setSpacing(10)
 
-        # 1. 글자 크기 조절
+        # 1. 글자 크기
         lbl_font = QLabel("글자크기:")
         self.spin_font = QSpinBox()
         self.spin_font.setRange(8, 30)
-        self.spin_font.setValue(10)  # 기본값
+        self.spin_font.setValue(10)
         self.spin_font.valueChanged.connect(self.on_font_size_changed)
 
         # 2. 검색 기능
         self.le_search = QLineEdit()
         self.le_search.setPlaceholderText("검색어 입력...")
         self.le_search.setFixedWidth(150)
-        self.le_search.returnPressed.connect(self.on_click_search)  # 엔터키 지원
+        self.le_search.returnPressed.connect(self.on_click_search)
 
         self.btn_search = QPushButton("🔍 검색")
         self.btn_search.clicked.connect(self.on_click_search)
@@ -865,7 +870,7 @@ class ReadInvoiceWidget(QWidget):
                 """)
         self.btn_complete.clicked.connect(self.on_click_complete)
 
-        # 4. [NEW] 문자 발송 처리 버튼
+        # 4. 문자 발송 처리 버튼
         self.btn_sms_done = QPushButton("📩 문자 발송 처리 (취소선)")
         self.btn_sms_done.setFixedHeight(30)
         self.btn_sms_done.setStyleSheet("""
@@ -881,65 +886,49 @@ class ReadInvoiceWidget(QWidget):
                 """)
         self.btn_sms_done.clicked.connect(self.on_click_sms_done)
 
-        # 레이아웃 배치
         control_layout.addWidget(lbl_font)
         control_layout.addWidget(self.spin_font)
-        control_layout.addStretch(1)  # 빈 공간 채우기
-        control_layout.addWidget(self.le_search)  # [6,7] 검색 입력칸 왼쪽, 검색 버튼 왼쪽
+        control_layout.addStretch(1)
+        control_layout.addWidget(self.le_search)
         control_layout.addWidget(self.btn_search)
         control_layout.addSpacing(10)
-        control_layout.addWidget(self.btn_complete)  # 완료 버튼
-        control_layout.addWidget(self.btn_sms_done)  # [5] 완료 버튼 오른쪽
+        control_layout.addWidget(self.btn_complete)
+        control_layout.addWidget(self.btn_sms_done)
 
         main_layout.addLayout(control_layout)
 
-        # ============================================================
-        # [추가됨] 문자 전송 패널 토글 버튼
-        # ============================================================
+        # 토글 버튼
         self.btn_toggle_sms = QPushButton("💬 문자 전송 패널 열기 (클릭)")
         self.btn_toggle_sms.setFixedHeight(30)
         self.btn_toggle_sms.clicked.connect(self.on_toggle_sms)
         main_layout.addWidget(self.btn_toggle_sms)
-        # ============================================================
 
-        # -------------------------
-        # 문자 전송 패널 (ship_sms)
-        # -------------------------
+        # 문자 전송 패널
         self._build_sms_panel(main_layout)
 
-        # ============================================================
-        # [수정됨] 하단 로그 영역 (3분할: 로그 | 작업현황 | 시간정보)
-        # ============================================================
-
-        # 1. 가로 배치를 위한 레이아웃 생성
+        # 하단 로그/대시보드
         bottom_log_layout = QHBoxLayout()
         bottom_log_layout.setSpacing(10)
 
-        # [1구역: 왼쪽] 기존 작업 로그 (self.log)
         self.log = QPlainTextEdit()
         self.log.setObjectName("ship_log")
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("▶ [1] 작업 로그 기록")
         self.log.setFixedHeight(150)
 
-        # [2구역: 가운데] 작업 현황 (1, 2, 3번 항목)
         self.info_dash_counts = QPlainTextEdit()
         self.info_dash_counts.setReadOnly(True)
         self.info_dash_counts.setPlaceholderText("▶ [2] 작업/각인 갯수 현황")
         self.info_dash_counts.setFixedHeight(150)
 
-        # [3구역: 오른쪽] 시간 정보 (4, 5번 항목)
         self.info_dash_time = QPlainTextEdit()
         self.info_dash_time.setReadOnly(True)
         self.info_dash_time.setPlaceholderText("▶ [3] 시작/소요 시간")
         self.info_dash_time.setFixedHeight(150)
 
-        # 레이아웃에 추가 (비율 1:1:1)
         bottom_log_layout.addWidget(self.log, 1)
         bottom_log_layout.addWidget(self.info_dash_counts, 1)
         bottom_log_layout.addWidget(self.info_dash_time, 1)
-
-        # 전체 레이아웃에 하단 영역 추가
         main_layout.addLayout(bottom_log_layout)
 
         # 시그널
@@ -947,13 +936,10 @@ class ReadInvoiceWidget(QWidget):
         self.table.itemDoubleClicked.connect(self.on_item_double_clicked)
         self.table.itemSelectionChanged.connect(self.on_table_selection_changed)
 
-        # -------------------------
-        # [추가] 대시보드용 변수 및 타이머
-        # -------------------------
+        # 대시보드 타이머
         self._start_time = None
         self._dashboard_timer = QTimer(self)
         self._dashboard_timer.setInterval(1000)
-
         self._dashboard_timer.timeout.connect(self._update_dashboard_timer)
 
         self._target_fonts = ["영문필기체", "영문바탕채", "한문바탕체", "한글바탕체"]
@@ -1064,29 +1050,76 @@ class ReadInvoiceWidget(QWidget):
 
     # [2] 검색 핸들러
     def on_click_search(self):
-        keyword = self.le_search.text().strip()
+        """검색 버튼 클릭 시 필터 적용"""
+        self._apply_filter()
+
+    def _apply_filter(self):
+        """
+        [핵심 로직] 콤보박스(필터)와 검색어(Search)를 모두 반영하여
+        조건에 맞지 않는 행을 숨깁니다(Hidden).
+        """
+        if self.current_df is None: return
+
+        filter_mode = self.combo_filter.currentText()
+        keyword = self.le_search.text().strip().lower()
+
         row_count = self.table.rowCount()
         col_count = self.table.columnCount()
 
-        if not keyword:
-            # 검색어 없으면 전체 보이기
-            for r in range(row_count):
-                self.table.setRowHidden(r, False)
-            return
-
-        # 검색 수행
         for r in range(row_count):
-            match_found = False
-            for c in range(col_count):
-                item = self.table.item(r, c)
-                if item and keyword.lower() in item.text().lower():
-                    match_found = True
-                    break
-            self.table.setRowHidden(r, not match_found)
+            # 0번 컬럼에 숨겨진 real_row 인덱스 가져오기 (정렬 무관)
+            item_0 = self.table.item(r, 0)
+            if not item_0: continue
+
+            real_row = item_0.data(Qt.UserRole)
+
+            # 데이터프레임에서 상태값 조회
+            work_val = str(self.current_df.at[real_row, "작업유무"]).strip()
+            sms_val = str(self.current_df.at[real_row, "문자발송처리"]).strip()
+
+            is_work_done = (work_val == "완료")
+            is_sms_done = (sms_val == "완료")
+
+            # 1. 콤보박스 필터 조건 확인
+            show_by_filter = False
+
+            if filter_mode == "전체":
+                show_by_filter = True
+
+            elif filter_mode == "작업중":
+                # 작업X AND 문자X
+                if not is_work_done and not is_sms_done:
+                    show_by_filter = True
+
+            elif filter_mode == "작업완료":
+                # 작업O AND 문자X
+                if is_work_done and not is_sms_done:
+                    show_by_filter = True
+
+            elif filter_mode == "문자발송완료":
+                # 문자O (작업은 당연히 되어 있어야 함)
+                if is_sms_done:
+                    show_by_filter = True
+
+            # 2. 검색어 조건 확인 (필터를 통과한 경우에만 검사)
+            final_show = False
+            if show_by_filter:
+                if not keyword:
+                    final_show = True
+                else:
+                    # 해당 줄의 모든 컬럼 텍스트에서 검색어 찾기
+                    for c in range(col_count):
+                        item = self.table.item(r, c)
+                        if item and keyword in item.text().lower():
+                            final_show = True
+                            break
+
+            # 3. 최종 반영
+            self.table.setRowHidden(r, not final_show)
 
     # [4,5] 문자 발송 처리 핸들러 (취소선)
     def on_click_sms_done(self):
-        """선택된 행 문자발송처리 토글 (완료/취소선 <-> 해제)"""
+        """[문자 발송 처리] 버튼: 취소선 표시 + 완료 텍스트"""
         if self.current_df is None or not self.current_file: return
 
         selected_rows = self.table.selectionModel().selectedRows()
@@ -1096,27 +1129,38 @@ class ReadInvoiceWidget(QWidget):
 
         if "문자발송처리" not in self.current_df.columns:
             self.current_df["문자발송처리"] = ""
+        if "작업유무" not in self.current_df.columns:
+            self.current_df["작업유무"] = ""
+
+        first_vis = selected_rows[0].row()
+        first_real = self.table.item(first_vis, 0).data(Qt.UserRole)
+        current_val = str(self.current_df.at[first_real, "문자발송처리"]).strip()
+        is_already_done = (current_val == "완료")
+
+        target_val = "" if is_already_done else "완료"
+        target_strike = False if is_already_done else True
+
+        # [안전장치 2] 문자발송처리를 '설정(완료)'하려는 경우, 작업이 완료되었는지 확인
+        if not is_already_done:  # 설정 시도
+            for idx in selected_rows:
+                v_r = idx.row()
+                r_r = self.table.item(v_r, 0).data(Qt.UserRole)
+                work_status = str(self.current_df.at[r_r, "작업유무"]).strip()
+                if work_status != "완료":
+                    QtWidgets.QMessageBox.warning(
+                        self, "처리 불가",
+                        "작업 완료하지 않은 항목이 포함되어 있습니다.\n먼저 [작업 완료] 처리를 해주세요."
+                    )
+                    return  # 중단
 
         try:
-            # 첫 번째 행 상태를 보고 '완료'할지 '해제'할지 결정
-            first_vis = selected_rows[0].row()
-            first_real = self.table.item(first_vis, 0).data(Qt.UserRole)
-            current_val = str(self.current_df.at[first_real, "문자발송처리"]).strip()
-
-            is_already_done = (current_val == "완료")
-
-            # 목표: 이미 완료면 -> 빈값(해제), 아니면 -> 완료
-            target_val = "" if is_already_done else "완료"
-            target_strike = False if is_already_done else True
-
             for idx in selected_rows:
                 visual_r = idx.row()
                 real_r = self.table.item(visual_r, 0).data(Qt.UserRole)
 
-                # 데이터 변경
                 self.current_df.at[real_r, "문자발송처리"] = target_val
 
-                # [핵심] 화면 취소선 그리기/지우기
+                # 취소선 그리기
                 for c in range(self.table.columnCount()):
                     item = self.table.item(visual_r, c)
                     if item:
@@ -1127,8 +1171,10 @@ class ReadInvoiceWidget(QWidget):
             action = "취소(해제)" if is_already_done else "완료(취소선)"
             self.log.appendPlainText(f"[문자발송] {len(selected_rows)}건 {action} 처리됨.")
 
-            # 화면 갱신
             self.table.repaint()
+
+            # [핵심] 변경 즉시 필터 재적용
+            self._apply_filter()
 
         except PermissionError:
             QtWidgets.QMessageBox.critical(self, "저장 실패", "엑셀 파일이 열려있습니다.")
@@ -1150,6 +1196,9 @@ class ReadInvoiceWidget(QWidget):
         self.current_file = file_path
         self.lbl_file.setText(f"선택된 파일: {os.path.basename(file_path)}")
 
+        # [핵심] 새 파일을 열 때는 항상 필터를 '전체'로 초기화
+        self.combo_filter.setCurrentIndex(0)
+
         invoice_type = self.combo_type.currentText()
         try:
             if invoice_type == "네이버 송장":
@@ -1158,8 +1207,6 @@ class ReadInvoiceWidget(QWidget):
                 df = self._load_coupang_invoice(file_path)
 
             df = self._add_item_count_column(df, invoice_type)
-
-            # [1] 컬럼 순서 및 표준화 (요청사항 적용)
             df = self._standardize_columns(df, invoice_type)
 
             self.current_df = df
@@ -1168,15 +1215,14 @@ class ReadInvoiceWidget(QWidget):
             self._show_df_in_table(df)
             self._log_columns(df, invoice_type, file_path)
 
-            # 1. 시작 시간 기록
             self._start_time = QDateTime.currentDateTime()
-
-            # 2. 타이머 시작
             self._dashboard_timer.start()
 
-            # 3. 화면 즉시 갱신 (두 함수 모두 호출)
-            self._update_dashboard_counts()  # 가운데 창 (갯수+시작시간)
-            self._update_dashboard_timer()  # 오른쪽 창 (소요시간)
+            self._update_dashboard_counts()
+            self._update_dashboard_timer()
+
+            # 필터 적용 (초기화 상태)
+            self._apply_filter()
 
         except (OSError, IOError, ValueError) as e:
             QtWidgets.QMessageBox.critical(self, "엑셀 읽기 오류", str(e))
@@ -1284,6 +1330,7 @@ class ReadInvoiceWidget(QWidget):
         self._update_sms_panel_for_row(real_row)
 
     def on_click_complete(self):
+        """[작업 완료] 버튼: 노란색 표시 + 완료 텍스트"""
         if self.current_df is None or not self.current_file:
             QtWidgets.QMessageBox.warning(self, "경고", "열린 파일이 없습니다.")
             return
@@ -1295,31 +1342,44 @@ class ReadInvoiceWidget(QWidget):
 
         if "작업유무" not in self.current_df.columns:
             self.current_df["작업유무"] = ""
+        if "문자발송처리" not in self.current_df.columns:
+            self.current_df["문자발송처리"] = ""
 
+        # 첫 번째 선택 행 기준으로 '완료'할지 '취소'할지 결정
+        first_vis = selected_rows[0].row()
+        first_real = self.table.item(first_vis, 0).data(Qt.UserRole)
+        current_val = str(self.current_df.at[first_real, "작업유무"]).strip()
+
+        is_already_done = (current_val == "완료")
+        target_val = "" if is_already_done else "완료"  # 토글
+
+        # [안전장치 1] 작업완료를 '해제(취소)'하려는 경우, 문자발송이 되어있는지 확인
+        if is_already_done:  # 해제 시도
+            for idx in selected_rows:
+                v_r = idx.row()
+                r_r = self.table.item(v_r, 0).data(Qt.UserRole)
+                sms_status = str(self.current_df.at[r_r, "문자발송처리"]).strip()
+                if sms_status == "완료":
+                    QtWidgets.QMessageBox.warning(
+                        self, "해제 불가",
+                        "문자 발송이 완료된 주문입니다.\n먼저 [문자 발송 처리]를 취소한 뒤, 작업 완료를 해제해주세요."
+                    )
+                    return  # 중단
+
+        # UI 색상 준비
         done_color = QtGui.QColor(255, 255, 100)
         white_color = QtGui.QColor(255, 255, 255)
-
-        # [★핵심] 첫 번째 선택된 줄의 '진짜 번호'를 확인해서 토글 상태 결정
-        first_visual_row = selected_rows[0].row()
-        first_real_idx = self.table.item(first_visual_row, 0).data(Qt.UserRole)
-
-        current_status = str(self.current_df.at[first_real_idx, "작업유무"]).strip()
-        is_already_done = (current_status == "완료")
-
         target_color = white_color if is_already_done else done_color
-        target_text = "" if is_already_done else "완료"
-        status_msg = "취소" if is_already_done else "완료"
 
         try:
             for idx in selected_rows:
                 visual_r = idx.row()
-                # [★핵심] 화면상 줄번호(visual_r)로 아이템을 찾고, 그 안의 진짜 번호(real_r)를 꺼냄
                 real_r = self.table.item(visual_r, 0).data(Qt.UserRole)
 
-                # (1) 데이터프레임 저장 -> 진짜 번호(real_r) 사용
-                self.current_df.at[real_r, "작업유무"] = target_text
+                # 데이터 변경
+                self.current_df.at[real_r, "작업유무"] = target_val
 
-                # (2) 화면 색칠 -> 보이는 번호(visual_r) 사용 (눈에 보이는 걸 바꿔야 하니까)
+                # 화면 색상 변경
                 for c in range(self.table.columnCount()):
                     it = self.table.item(visual_r, c)
                     if it:
@@ -1333,9 +1393,14 @@ class ReadInvoiceWidget(QWidget):
                         bg_style = "background-color: #ffffaa;" if not is_already_done else ""
                         widget.setStyleSheet(bg_style)
 
-            # 엑셀 저장
             self.current_df.to_excel(self.current_file, index=False, engine="openpyxl")
-            self.log.appendPlainText(f"[저장] {len(selected_rows)}건 {status_msg} 처리 완료.")
+
+            action_name = "취소" if is_already_done else "완료"
+            self.log.appendPlainText(f"[작업] {len(selected_rows)}건 {action_name} 처리됨.")
+
+            # [핵심] 변경 즉시 필터 재적용 (화면에서 사라지게 하기 위함)
+            self._apply_filter()
+            self._update_dashboard_counts()
 
         except PermissionError:
             QtWidgets.QMessageBox.critical(self, "저장 실패", "엑셀 파일이 열려있습니다.")
@@ -1343,7 +1408,6 @@ class ReadInvoiceWidget(QWidget):
             QtWidgets.QMessageBox.critical(self, "오류", f"저장 중 오류: {e}")
 
         self.table.clearSelection()
-        self._update_dashboard_counts()
 
     # ------------------------------------------------------------------
     # [수정] 문자 전송: '받으시는 분' -> '구매자'로 변경
@@ -1371,28 +1435,35 @@ class ReadInvoiceWidget(QWidget):
         self._send_via_adb(clean_phone, message)
 
     def on_send_all(self):
-        """표시된 전체 고객에게 일괄 보내기 (ADB)"""
+        """표시된(숨겨지지 않은) 전체 고객에게 일괄 보내기"""
         row_count = self.table.rowCount()
-        if row_count == 0:
-            QtWidgets.QMessageBox.information(self, "알림", "표시된 고객이 없습니다.")
+
+        # [수정] 실제로 눈에 보이는 행의 개수만 세기
+        visible_rows = []
+        for r in range(row_count):
+            if not self.table.isRowHidden(r):
+                visible_rows.append(r)
+
+        count = len(visible_rows)
+        if count == 0:
+            QtWidgets.QMessageBox.information(self, "알림", "현재 화면에 표시된 고객이 없습니다.")
             return
 
         reply = QtWidgets.QMessageBox.question(
             self, "전체 발송",
-            f"현재 목록에 있는 {row_count}명(구매자)에게 순차적으로 문자를 보낼까요?\n"
-            "(휴대폰 화면이 계속 바뀝니다)",
+            f"현재 화면에 표시된 {count}명에게 문자를 보낼까요?\n"
+            "(필터로 숨겨진 고객은 제외됩니다)",
             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
         )
         if reply == QtWidgets.QMessageBox.No:
             return
 
-        for row in range(row_count):
-            real_row = self.table.item(row, 0).data(Qt.UserRole)
+        for visual_row in visible_rows:
+            # 숨겨진 행은 건너뛰고 진행
+            real_row = self.table.item(visual_row, 0).data(Qt.UserRole)
 
-            # [수정] 받으시는 분 -> 구매자명 / 전화 -> 구매자연락처
             name = self._get_cell_text(real_row, "구매자명")
             phone = self._get_cell_text(real_row, "구매자연락처")
-            item_name = self._get_cell_text(real_row, "품목명")
 
             clean_phone = phone.replace("-", "").replace(" ", "").strip()
             if not clean_phone: continue
@@ -1401,11 +1472,10 @@ class ReadInvoiceWidget(QWidget):
 
             self._send_via_adb(clean_phone, message)
 
-            # 폰 성능에 따라 대기시간 조절 (기본 1.5초)
             import PyQt5.QtTest as QTest
             QTest.QTest.qWait(1500)
 
-        self.log.appendPlainText(f"[전체발송] {row_count}건 명령 전달 완료.")
+        self.log.appendPlainText(f"[전체발송] {count}건 명령 전달 완료.")
 
     # ------------------------------------------------------------------
     # [추가] 실제 ADB 명령 수행 함수
