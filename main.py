@@ -1,7 +1,7 @@
 # C:\my_games\excel_cal\main.py
 # -*- coding: utf-8 -*-
 from __future__ import annotations
-import sys
+import sys, os
 sys.path.append('C:/my_games/excel_cal/module')
 
 venv_path = os.path.join(os.getcwd(), ".venv", "Lib", "site-packages")

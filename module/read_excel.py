@@ -157,60 +157,157 @@ class CopyLinesDialog(QDialog):
         self._refresh_list_ui()
 
     def _refresh_list_ui(self):
-        """현재 self.raw_lines를 기반으로 화면을 다시 그립니다."""
+        """현재 self.raw_lines를 기반으로 화면을 다시 그립니다. (폰트 콤보박스 추가됨)"""
         # 기존 아이템들 삭제 (레이아웃 청소)
         while self.content_layout.count():
             child = self.content_layout.takeAt(0)
             if child.widget():
                 child.widget().deleteLater()
             elif child.layout():
-                # 레이아웃이 중첩된 경우 처리 (안전장치)
                 import sip
                 sip.delete(child)
 
         self.parsed_items = []
         self._ui_rows = []
 
+        # 폰트 옵션 정의 (오타 수정됨)
+        font_options = ["확인불가", "영문필기체", "영문바탕체", "한문바탕체", "한글바탕체"]
+
         # 다시 파싱
         for idx, line in enumerate(self.raw_lines):
             parts = self._parse_structure(line, self.invoice_type)
             if parts:
-                self.parsed_items.append({
+                item_data = {
                     "line_idx": idx,
                     "prefix": parts[0],
                     "core": parts[1],
                     "suffix": parts[2]
+                }
+                self.parsed_items.append(item_data)
+
+                # --- UI Row 생성 ---
+                row_layout = QHBoxLayout()
+
+                # [1] 배지 생성 (원본 줄 전체 넘김)
+                badges = self._create_badges(line)
+                for badge in badges:
+                    row_layout.addWidget(badge)
+
+                # [2] 텍스트 에디트 (문구만 표시)
+                edit = QLineEdit()
+                edit.setText(item_data["core"])
+                edit.setReadOnly(True)
+                edit.setStyleSheet("background-color: #f0f0f0; color: #333;")
+
+                # [3] 폰트 선택 콤보박스 (NEW)
+                combo_font = QComboBox()
+                combo_font.addItems(font_options)
+                combo_font.setFixedWidth(100)
+                combo_font.setEnabled(False)  # 기본은 비활성 (수정 버튼 눌러야 활성)
+
+                # 현재 줄에 어떤 폰트가 있는지 확인해서 디폴트 값 설정
+                current_font = "확인불가"
+                for f_opt in font_options:
+                    if f_opt != "확인불가" and f_opt in line:
+                        current_font = f_opt
+                        break
+                combo_font.setCurrentText(current_font)
+
+                # 콤보박스 스타일 (비활성일 때 회색조)
+                combo_font.setStyleSheet("QComboBox:!enabled { background-color: #f0f0f0; color: #888; }")
+
+                # [4] 버튼들
+                btn_edit = QPushButton("수정")
+                btn_edit.setFixedWidth(50)
+
+                btn_copy = QPushButton("COPY")
+                btn_copy.setFixedWidth(60)
+
+                # 핸들러 연결 (콤보박스도 같이 넘김)
+                self._connect_handlers(edit, combo_font, btn_edit, btn_copy, item_data)
+
+                row_layout.addWidget(edit, 1)
+                row_layout.addWidget(combo_font)  # 에디트 옆에 추가
+                row_layout.addWidget(btn_edit)
+                row_layout.addWidget(btn_copy)
+                self.content_layout.addLayout(row_layout)
+
+                self._ui_rows.append({
+                    "edit": edit,
+                    "combo": combo_font,
+                    "btn_edit": btn_edit,
+                    "btn_copy": btn_copy
                 })
 
-        # 다시 그리기
-        for item in self.parsed_items:
-            row_layout = QHBoxLayout()
-
-            edit = QLineEdit()
-            edit.setText(item["core"])
-            edit.setReadOnly(True)
-            edit.setStyleSheet("background-color: #f0f0f0; color: #333;")
-
-            btn_edit = QPushButton("수정")
-            btn_edit.setFixedWidth(60)
-
-            btn_copy = QPushButton("COPY")
-            btn_copy.setFixedWidth(70)
-
-            self._connect_handlers(edit, btn_edit, btn_copy, item)
-
-            row_layout.addWidget(edit, 1)
-            row_layout.addWidget(btn_edit)
-            row_layout.addWidget(btn_copy)
-            self.content_layout.addLayout(row_layout)
-
-            self._ui_rows.append({
-                "edit": edit,
-                "btn_edit": btn_edit,
-                "btn_copy": btn_copy
-            })
-
         self.content_layout.addStretch(1)
+
+    def _create_badges(self, full_text: str) -> List[QLabel]:
+        """
+        원본 줄(full_text)에서 키워드(M1, S, 폰트명)를 찾아 배지(라벨) 리스트로 반환.
+        폰트가 없으면 '확인불가' 배지를 추가함.
+        """
+        badges = []
+
+        # 1. 유형 코드 (M1, S, W2 등)
+        type_keywords = {
+
+            "M1)": ("#ffcccc", "#d6336c"),  # 핑크
+
+            "S)": ("#cce5ff", "#004085"),  # 블루
+
+            "W2)": ("#e2e3e5", "#383d41"),  # 그레이
+
+        }
+
+        # 2. 폰트 코드 (오타 포함해서 다양하게 감지)
+        # 키(검색어): (배경색, 글자색, 화면표시텍스트)
+        font_keywords = {
+            "영문필기체": ("#fff3cd", "#856404", "영문필기체"),
+            "영문 필기체": ("#fff3cd", "#856404", "영문필기체"),
+            "영문바탕채": ("#d4edda", "#155724", "영문바탕체"),  # 오타 보정
+            "영문바탕체": ("#d4edda", "#155724", "영문바탕체"),
+            "영문 바탕체": ("#d4edda", "#155724", "영문바탕체"),
+            "한문바탕체": ("#d1ecf1", "#0c5460", "한문바탕체"),
+            "한문 바탕체": ("#d1ecf1", "#0c5460", "한문바탕체"),
+            "한글바탕체": ("#f8d7da", "#721c24", "한글바탕체"),
+            "한글 바탕체": ("#f8d7da", "#721c24", "한글바탕체"),
+        }
+
+        # (1) 유형 코드 배지 생성
+        for key, colors in type_keywords.items():
+            # M1, S 등은 괄호나 공백과 붙어있을 수 있으므로 단순 포함 여부 확인
+            if key in full_text:
+                lbl = QLabel(key)
+                lbl.setStyleSheet(
+                    f"background-color: {colors[0]}; color: {colors[1]}; "
+                    f"border-radius: 4px; padding: 2px 6px; font-weight: bold; font-family: 맑은 고딕;"
+                )
+                badges.append(lbl)
+
+        # (2) 폰트 코드 배지 생성
+        font_found = False
+        for key, val in font_keywords.items():
+            bg_color, txt_color, display_text = val
+            if key in full_text:
+                font_found = True
+                lbl = QLabel(display_text)
+                lbl.setStyleSheet(
+                    f"background-color: {bg_color}; color: {txt_color}; "
+                    f"border-radius: 4px; padding: 2px 6px; font-weight: bold; font-family: 맑은 고딕;"
+                )
+                badges.append(lbl)
+                break  # 폰트는 한 줄에 하나만 나올 테니 찾으면 중단 (중복 방지)
+
+        # (3) 폰트를 못 찾았을 경우 -> '확인불가' 배지
+        if not font_found:
+            lbl = QLabel("확인불가")
+            lbl.setStyleSheet(
+                "background-color: #343a40; color: #ffffff; "  # 진한 검회색 배경, 흰 글씨
+                "border-radius: 4px; padding: 2px 6px; font-weight: bold; font-family: 맑은 고딕;"
+            )
+            badges.append(lbl)
+
+        return badges
 
     def on_click_edit_all(self):
         """[전체 문구 수정] 버튼 클릭 핸들러"""
@@ -270,32 +367,85 @@ class CopyLinesDialog(QDialog):
         suffix = line[start_idx + len(temp_core):]
         return (prefix, temp_core, suffix)
 
-    def _connect_handlers(self, edit, btn_edit, btn_copy, item_data):
-        """(기존 로직 유지) 개별 줄 수정/복사 핸들러"""
-
+    def _connect_handlers(self, edit, combo_font, btn_edit, btn_copy, item_data):
         def on_edit_click():
             if btn_edit.text() == "수정":
+                # 수정 모드 진입
                 edit.setReadOnly(False)
                 edit.setFocus()
                 edit.setStyleSheet("background-color: #ffffff; color: #000; border: 2px solid #4dabf7;")
+
+                # 폰트 선택 활성화
+                combo_font.setEnabled(True)
+                combo_font.setStyleSheet("background-color: #ffffff; color: #000; border: 1px solid #4dabf7;")
+
                 btn_edit.setText("저장")
                 btn_edit.setStyleSheet("color: blue; font-weight: bold;")
                 btn_copy.setEnabled(False)
             else:
-                # 개별 저장
-                new_text = edit.text()
-                item_data["core"] = new_text
-                new_line = item_data["prefix"] + new_text + item_data["suffix"]
-                self.raw_lines[item_data["line_idx"]] = new_line
+                # [저장 로직]
 
+                # 1. 텍스트 박스의 변경된 문구 가져오기
+                new_core_text = edit.text()
+
+                # 2. 콤보박스에서 선택된 폰트 가져오기
+                new_font = combo_font.currentText()
+
+                # 3. 원본 줄(raw_line) 가져오기
+                original_line = self.raw_lines[item_data["line_idx"]]
+
+                # 4. 폰트 교체 작업
+                # (1) 기존에 있던 폰트 텍스트 제거 (확인불가 제외)
+                font_options = ["영문필기체", "영문 필기체", "영문바탕체", "영문 바탕체", "영문바탕채",
+                                "한문바탕체", "한문 바탕체", "한글바탕체", "한글 바탕체"]
+
+                temp_line = original_line
+                for f in font_options:
+                    temp_line = temp_line.replace(f, "")  # 기존 폰트 삭제
+
+                # (2) 문구(Core) 부분 교체
+                # 기존 Core를 찾아서 새 Core로 바꿈 (단순 replace는 위험할 수 있으니 구조 기반 재조립 권장)
+                # 여기서는 안전하게 prefix + new_core + suffix 구조를 사용하려 했으나,
+                # 폰트 위치가 prefix/suffix 어디에 있을지 모르므로 '=>' 기준으로 삽입합니다.
+
+                # 일단 Core 텍스트 업데이트 (item_data 구조상)
+                # 하지만 temp_line은 이미 폰트가 빠진 상태의 전체 줄임.
+                # 여기서 Core 부분을 교체해줘야 함.
+                if item_data["core"] in temp_line:
+                    temp_line = temp_line.replace(item_data["core"], new_core_text)
+
+                # (3) 새 폰트 삽입 ("확인불가"가 아니면 삽입)
+                if new_font != "확인불가":
+                    # '=>' 가 있으면 그 앞에 폰트 삽입
+                    if "=>" in temp_line:
+                        parts = temp_line.split("=>", 1)  # 첫번째 => 기준 분리
+                        # 앞부분 + 공백 + 새 폰트 + => + 뒷부분
+                        temp_line = f"{parts[0].strip()} {new_font}=>{parts[1]}"
+                    else:
+                        # 혹시 '=>'가 없으면(드물지만) 맨 뒤에 붙임
+                        temp_line = f"{temp_line} {new_font}"
+
+                # 5. 최종 데이터 업데이트
+                item_data["core"] = new_core_text  # 내부 데이터 갱신
+                self.raw_lines[item_data["line_idx"]] = temp_line  # 전체 줄 갱신
+
+                # 전체 텍스트 합쳐서 콜백으로 저장 요청 (엑셀 저장)
                 new_full_text = "\n".join(self.raw_lines)
                 self.save_callback(new_full_text)
 
+                # 6. UI 복귀 (읽기 전용)
                 edit.setReadOnly(True)
                 edit.setStyleSheet("background-color: #f0f0f0; color: #333;")
+
+                combo_font.setEnabled(False)
+                combo_font.setStyleSheet("QComboBox:!enabled { background-color: #f0f0f0; color: #888; }")
+
                 btn_edit.setText("수정")
                 btn_edit.setStyleSheet("")
                 btn_copy.setEnabled(True)
+
+                # 리스트 새로고침 (배지 업데이트 등을 위해)
+                self._refresh_list_ui()
 
         def on_copy_click():
             text = edit.text()
@@ -1572,9 +1722,7 @@ class ReadInvoiceWidget(QWidget):
     # ------------------------------------------------------------------
     # "문구개수" 컬럼 자동 추가
     # ------------------------------------------------------------------
-    def _add_item_count_column(
-            self, df: pd.DataFrame, invoice_type: str
-    ) -> pd.DataFrame:
+    def _add_item_count_column(self, df: pd.DataFrame, invoice_type: str) -> pd.DataFrame:
         col_key = None
         for cand in ("품목명", "상품명"):
             if cand in df.columns:
@@ -1583,15 +1731,25 @@ class ReadInvoiceWidget(QWidget):
         if col_key is None:
             return df
 
+        # [설정] 갯수를 셀 '유형 코드' 목록 (여기에 없는 줄은 '=> 숫자 ea'가 있어도 무시함)
+        target_codes = ["M1)", "S)", "W2)"]
+
         counts: List[int] = []
         for idx in range(len(df)):
             val = df.iloc[idx][col_key]
             text = "" if pd.isna(val) else str(val)
-            if invoice_type == "네이버 송장":
-                lines = self._parse_naver_lines(text)
-            else:
-                lines = self._parse_coupang_lines(text)
-            counts.append(len(lines))
+
+            row_total = 0
+            # 줄 단위로 쪼개서 확인
+            for line in text.splitlines():
+                # 1. 해당 줄에 우리가 원하는 코드(M1, S, W2)가 있는지 확인
+                if any(code in line for code in target_codes):
+                    # 2. 있다면 '=> 숫자 ea' 패턴을 찾아 숫자만 추출
+                    match = re.search(r"=>\s*(\d+)\s*ea", line)
+                    if match:
+                        row_total += int(match.group(1))
+
+            counts.append(row_total)
 
         base_name = "문구개수"
         col_name = base_name
@@ -1716,7 +1874,7 @@ class ReadInvoiceWidget(QWidget):
         """
         [가운데 창] 업데이트:
         1. 전체 작업 (완료/전체)
-        2. 각인 갯수 (완료/전체)
+        2. 각인 갯수 (완료/전체) -> M1, S, W2 코드가 있는 줄의 ea만 합산
         3. 시작 시간
         """
         if self.current_df is None or self._start_time is None:
@@ -1724,19 +1882,18 @@ class ReadInvoiceWidget(QWidget):
             return
 
         total_rows = len(self.current_df)
-
-        # 타겟 컬럼 찾기
         target_col = None
         for col in ["품목명", "상품명"]:
             if col in self.current_df.columns:
                 target_col = col
                 break
 
-        # --- 카운팅 변수 ---
-        completed_rows = 0  # 1번: 완료된 행 갯수
+        # [설정] 카운팅 대상 코드
+        target_codes = ["M1)", "S)", "W2)"]
 
-        total_gagin_count = 0  # 2번: 전체 각인 글자 수
-        completed_gagin_count = 0  # 2번: 완료된 각인 글자 수
+        completed_rows = 0
+        total_gagin_count = 0
+        completed_gagin_count = 0
 
         if target_col:
             if "작업유무" not in self.current_df.columns:
@@ -1747,36 +1904,35 @@ class ReadInvoiceWidget(QWidget):
                 status = str(self.current_df.iloc[i]["작업유무"]).strip()
                 is_done = (status == "완료")
 
-                # 1. 완료된 행 카운트
                 if is_done:
                     completed_rows += 1
 
-                # 2. 각인 글자 수 카운트 (행별 합산) - 여기가 삭제됐던 핵심 로직
+                # 행 내부의 줄(Line) 별로 검사
                 row_gagin = 0
-                for kw in self._target_fonts:
-                    row_gagin += item_name.count(kw)
+                for line in item_name.splitlines():
+                    # M1, S, W2 중 하나라도 포함되어 있어야 카운트
+                    if any(code in line for code in target_codes):
+                        match = re.search(r"=>\s*(\d+)\s*ea", line)
+                        if match:
+                            row_gagin += int(match.group(1))
 
                 total_gagin_count += row_gagin
                 if is_done:
                     completed_gagin_count += row_gagin
 
-        # 3. 시작 시간
         start_time_str = self._start_time.toString("yyyy-MM-dd HH:mm:ss")
-
-        # --- 화면 출력 포맷 ---
-        # (완료 / 전체) 형식으로 통일하여 직관적으로 표시
         text_counts = (
             f"📊 [작업 현황]\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"1. 전체 작업 갯수 :  {completed_rows} / {total_rows} 건\n"
             f"   (완료 / 전체 행)\n\n"
             f"2. 각인 갯수 현황 :  {completed_gagin_count} / {total_gagin_count} 개\n"
-            f"   (완료 / 전체 키워드)\n\n"
+            f"   (완료 / 전체 수량(ea))\n"
+            f"   ※ M1, S, W2 포함 항목만 집계\n\n"
             f"3. 시작 시간 :\n"
             f"   {start_time_str}"
         )
         self.info_dash_counts.setPlainText(text_counts)
-
     def _update_dashboard_timer(self):
         """
         [오른쪽 창] 업데이트: 5번 항목 (실시간 소요 시간)
