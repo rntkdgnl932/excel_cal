@@ -2016,8 +2016,8 @@ class ReadInvoiceWidget(QWidget):
     def _update_dashboard_counts(self):
         """
         [가운데 창] 업데이트:
-        1. 전체 작업 (완료/전체)
-        2. 각인 갯수 (완료/전체) -> M1, S, W2 코드가 있는 줄의 ea만 합산
+        1. 전체 작업 (완료/전체) + 남은 건수
+        2. 각인 갯수 (완료/전체) + 남은 수량 상세(S, M1, W2)
         3. 시작 시간
         """
         if self.current_df is None or self._start_time is None:
@@ -2033,6 +2033,9 @@ class ReadInvoiceWidget(QWidget):
 
         # [설정] 카운팅 대상 코드
         target_codes = ["M1)", "S)", "W2)"]
+
+        # [NEW] 남은 수량(해야 할 것) 상세 집계를 위한 딕셔너리
+        remaining_breakdown = {"M1)": 0, "S)": 0, "W2)": 0}
 
         completed_rows = 0
         total_gagin_count = 0
@@ -2051,31 +2054,45 @@ class ReadInvoiceWidget(QWidget):
                     completed_rows += 1
 
                 # 행 내부의 줄(Line) 별로 검사
-                row_gagin = 0
                 for line in item_name.splitlines():
-                    # M1, S, W2 중 하나라도 포함되어 있어야 카운트
-                    if any(code in line for code in target_codes):
-                        match = re.search(r"=>\s*(\d+)\s*ea", line)
-                        if match:
-                            row_gagin += int(match.group(1))
+                    # 각 코드별로 확인 (M1, S, W2)
+                    for code in target_codes:
+                        if code in line:
+                            match = re.search(r"=>\s*(\d+)\s*ea", line)
+                            if match:
+                                qty = int(match.group(1))
 
-                total_gagin_count += row_gagin
-                if is_done:
-                    completed_gagin_count += row_gagin
+                                # 전체 합산
+                                total_gagin_count += qty
+
+                                # 완료 여부에 따른 분기
+                                if is_done:
+                                    completed_gagin_count += qty
+                                else:
+                                    # 미완료(해야 할 것) 시 상세 카운트 적립
+                                    remaining_breakdown[code] += qty
+
+                            # 한 줄에 코드가 하나만 있다고 가정하고 break (중복 집계 방지)
+                            break
 
         start_time_str = self._start_time.toString("yyyy-MM-dd HH:mm:ss")
+
+        # 남은 건수 계산
+        remain_rows = total_rows - completed_rows
+        remain_gagin = total_gagin_count - completed_gagin_count
+
         text_counts = (
             f"📊 [작업 현황]\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"1. 전체 작업 갯수 :  {completed_rows} / {total_rows} 건\n"
-            f"   (완료 / 전체 행)\n\n"
-            f"2. 각인 갯수 현황 :  {completed_gagin_count} / {total_gagin_count} 개\n"
-            f"   (완료 / 전체 수량(ea))\n"
-            f"   ※ M1, S, W2 포함 항목만 집계\n\n"
-            f"3. 시작 시간 :\n"
-            f"   {start_time_str}"
+            f"1. 전체 작업 갯수 :  {completed_rows} / {total_rows} 건 (총 {remain_rows}건 남음)\n\n"
+            f"2. 각인 갯수 현황 :  {completed_gagin_count} / {total_gagin_count} 개 (총 {remain_gagin}건 남음)\n"
+            f"   ※ M1, S, W2 집계 => "
+            f"[ S : {remaining_breakdown['S)']}개, M1 : {remaining_breakdown['M1)']}개, W2 : {remaining_breakdown['W2)']}개 ]\n\n"
+            f"3. 시작 시간 : {start_time_str}"
         )
         self.info_dash_counts.setPlainText(text_counts)
+
+
     def _update_dashboard_timer(self):
         """
         [오른쪽 창] 업데이트: 5번 항목 (실시간 소요 시간)
@@ -2099,8 +2116,7 @@ class ReadInvoiceWidget(QWidget):
         text_time = (
             f"⏰ [실시간 소요]\n"
             f"━━━━━━━━━━━━━━━━━━\n"
-            f"5. 현재 소요 시간 :\n\n"
-            f"   {time_elapsed_str}"
+            f" 현재 소요 시간 : {time_elapsed_str}"
         )
         self.info_dash_time.setPlainText(text_time)
 
