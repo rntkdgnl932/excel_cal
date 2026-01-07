@@ -15,6 +15,12 @@ import re
 from pathlib import Path
 from typing import List
 
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+
 from PyQt5 import QtWidgets, QtCore
 
 from vat_excel_tool import (
@@ -27,6 +33,8 @@ from vat_excel_tool import (
 )
 
 
+from utils import run_job_with_progress_async
+
 # 풀버젼
         # git config --global --add safe.directory C:/my_games/excel_cal
         # auto_blog
@@ -35,6 +43,128 @@ from vat_excel_tool import (
         # 업데이트버젼
         # pyinstaller --hidden-import PyQt5 --hidden-import pyserial --hidden-import requests --hidden-import chardet --add-data="C:\\my_games\\game_folder\\data_game;./data_game" --name game_folder -i="game_folder_macro.ico" --add-data="game_folder_macro.ico;./" --icon="game_folder_macro.ico" --paths "C:\Users\1_S_3\AppData\Local\Programs\Python\Python311\Lib\site-packages\cv2" main.py
 
+class GoogleDriveUploader:
+    def __init__(self, root_dir):
+        # root_dir은 C:\my_games\excel_cal 경로를 받습니다.
+        self.secrets_dir = Path(root_dir) / "secrets"
+        self.scopes = ['https://www.googleapis.com/auth/drive']
+        self.service = None
+
+        current_dir = Path(root_dir)
+        if (current_dir / "secrets").exists():
+            self.secrets_dir = current_dir / "secrets"
+        else:
+            self.secrets_dir = current_dir.parent / "secrets"
+            if not self.secrets_dir.exists():
+                self.secrets_dir = Path(r"C:\my_games\excel_cal\secrets")
+
+        self.scopes = ['https://www.googleapis.com/auth/drive']
+        self.service = None
+
+    def authenticate(self):
+        creds = None
+        # ▼▼▼ [수정] 파일명을 'token_drive.json'으로 변경하여 캘린더와 분리 ▼▼▼
+        token_path = self.secrets_dir / 'token_drive.json'
+        secret_path = self.secrets_dir / 'client_secret.json'
+
+        if token_path.exists():
+            creds = Credentials.from_authorized_user_file(str(token_path), self.scopes)
+
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                except Exception:
+                    if token_path.exists():
+                        os.remove(token_path)
+                    creds = None
+
+            if not creds:
+                if not secret_path.exists():
+                    return None
+
+                flow = InstalledAppFlow.from_client_secrets_file(str(secret_path), self.scopes)
+                creds = flow.run_local_server(port=0)
+
+            with open(token_path, 'w') as token:
+                token.write(creds.to_json())
+
+        self.service = build('drive', 'v3', credentials=creds)
+        return self.service
+
+    def upload_folder(self, local_folder_path, target_folder_name, progress_callback=None):
+        """[수정됨] 특정 마스터 폴더 안에 날짜별 폴더를 생성하여 업로드 (진행상황 콜백 지원)"""
+        try:
+            if not self.service:
+                if not self.authenticate():
+                    return "인증 실패: client_secret.json을 찾을 수 없음"
+
+            # -----------------------------------------------------------
+            # 1. 최상위 '마스터 폴더' 확인 또는 생성 (예: 하비브라운_정산)
+            # -----------------------------------------------------------
+            master_folder_name = "하비브라운_정산"
+
+            if progress_callback:
+                progress_callback({"msg": f"드라이브 폴더 확인 중: {master_folder_name}"})
+
+            master_id = self._create_remote_folder(master_folder_name, parent_id=None)
+
+            # -----------------------------------------------------------
+            # 2. 마스터 폴더 안에 '이번 거래처 폴더' 생성
+            # -----------------------------------------------------------
+            if progress_callback:
+                progress_callback({"msg": f"하위 폴더 생성 중: {target_folder_name}"})
+
+            folder_id = self._create_remote_folder(target_folder_name, parent_id=master_id)
+
+            uploaded_count = 0
+            # 3. 파일 업로드
+            files = os.listdir(local_folder_path)
+            total_files = len(files)
+
+            for idx, filename in enumerate(files):
+                file_path = os.path.join(local_folder_path, filename)
+                if os.path.isfile(file_path):
+
+                    if progress_callback:
+                        progress_callback({"msg": f"업로드 중 ({idx + 1}/{total_files}): {filename}"})
+
+                    file_metadata = {'name': filename, 'parents': [folder_id]}
+                    media = MediaFileUpload(file_path, resumable=True)
+                    self.service.files().create(
+                        body=file_metadata, media_body=media, fields='id'
+                    ).execute()
+                    uploaded_count += 1
+
+            return f"업로드 완료 ({master_folder_name} > {target_folder_name})"
+
+        except Exception as e:
+            # 호출한 곳에서 에러를 잡을 수 있게 다시 던짐
+            raise e
+
+    def _create_remote_folder(self, folder_name, parent_id=None):
+        """내부 메서드: 폴더 ID 조회 또는 생성 (부모 폴더 지정 기능 추가)"""
+        # 부모 폴더가 지정되었으면 쿼리에 추가
+        if parent_id:
+            query = f"name = '{folder_name}' and '{parent_id}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        else:
+            query = f"name = '{folder_name}' and 'root' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+
+        results = self.service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+        items = results.get('files', [])
+
+        if items:
+            return items[0]['id']
+        else:
+            metadata = {
+                'name': folder_name,
+                'mimeType': 'application/vnd.google-apps.folder'
+            }
+            if parent_id:
+                metadata['parents'] = [parent_id]
+
+            file = self.service.files().create(body=metadata, fields='id').execute()
+            return file.get('id')
 
 class ExcelCalWindow(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
@@ -53,7 +183,7 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         root.setContentsMargins(10, 10, 10, 10)
         root.setSpacing(10)
 
-        base_dir = Path(__file__).resolve().parent
+        base_dir = Path(__file__).resolve().parent.parent
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Vertical)
         splitter.setChildrenCollapsible(False)
@@ -288,15 +418,21 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         btn_cal_items = QtWidgets.QPushButton("품목 계산하기")
         btn_cal_items.setProperty("accent", True)
 
+        self.btn_google_auth = QtWidgets.QPushButton("구글키인증")
+        self.btn_google_auth.setMinimumHeight(30)
+        self.btn_google_auth.setStyleSheet("color: blue; font-weight: bold;")  # 파란색으로 눈에 띄게
+
         btn_row_layout.addWidget(btn_add)
         btn_row_layout.addWidget(btn_del)
         btn_row_layout.addWidget(btn_cal_items)
         btn_row_layout.addStretch(1)
+        btn_row_layout.addWidget(self.btn_google_auth)
         vbox_items.addLayout(btn_row_layout)
 
         btn_add.clicked.connect(self.add_row)
         btn_del.clicked.connect(self.delete_selected_rows)
         btn_cal_items.clicked.connect(self.on_calc_items)
+        self.btn_google_auth.clicked.connect(self.on_google_auth)
 
         summary_layout = QtWidgets.QHBoxLayout()
         self.lbl_sum_supply = QtWidgets.QLabel("공급가 합계: -")
@@ -508,67 +644,107 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         return info, items_computed
 
     def _run_export(self, do_quote: bool, do_delivery: bool, do_statement: bool):
+        # 1. 데이터 수집 및 계산 (UI 접근이 필요하므로 메인 스레드에서 수행)
         try:
             info, items_computed = self._ensure_items_computed()
 
-            # 템플릿 경로는 UI에 적힌 값(기본은 C:\my_games\excel_cal\ex\... )
+            # 템플릿 경로 확인
             quote_tpl = Path(self.le_tpl_quote.text().strip())
             delivery_tpl = Path(self.le_tpl_delivery.text().strip())
             statement_tpl = Path(self.le_tpl_statement.text().strip())
 
-            # --- [변경] 결과 저장 루트: C:\my_games\excel_cal\out ---
+            # 결과 저장 루트
             out_root = Path(r"C:\my_games\excel_cal\out")
             out_root.mkdir(parents=True, exist_ok=True)
 
-            # 날짜(yyyy-MM-dd) + 거래처명으로 서브 폴더 생성
+            # 폴더명 생성
             safe_customer = re.sub(r'[\\/:*?"<>|]', "_", info.customer_name or "미정")
             date_str = info.supply_date or datetime.now().strftime("%Y-%m-%d")
-
-            # 예: C:\my_games\excel_cal\out\2025-12-08_하비브라운
             folder_name = f"{date_str}_{safe_customer}"
             out_dir = out_root / folder_name
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "준비 오류", f"데이터를 확인하는 중 오류가 발생했습니다.\n{e}")
+            return
+
+        # 2. 비동기로 실행할 작업 정의 (엑셀 생성 + 업로드)
+        def export_job(progress_callback):
+            progress_callback({"msg": "로컬 폴더 생성 중..."})
             out_dir.mkdir(parents=True, exist_ok=True)
 
             messages = []
 
+            # (1) 엑셀 파일 생성
             if do_quote:
+                progress_callback({"msg": "견적서 엑셀 생성 중..."})
                 if quote_tpl.is_file():
                     out_path = out_dir / "견적서_자동생성.xlsx"
-                    fill_quote_template(quote_tpl, out_path, info, items_computed)
-                    messages.append(f"견적서: {out_path}")
+                    fill_quote_template(str(quote_tpl), str(out_path), info, items_computed)
+                    messages.append(f"견적서: {out_path.name}")
                 else:
-                    messages.append(f"[경고] 견적서 템플릿 없음: {quote_tpl}")
+                    messages.append(f"[경고] 견적서 템플릿 없음")
 
             if do_delivery:
+                progress_callback({"msg": "납품서 엑셀 생성 중..."})
                 if delivery_tpl.is_file():
                     out_path = out_dir / "납품서_자동생성.xlsx"
-                    fill_delivery_template(delivery_tpl, out_path, info, items_computed)
-                    messages.append(f"납품서: {out_path}")
+                    fill_delivery_template(str(delivery_tpl), str(out_path), info, items_computed)
+                    messages.append(f"납품서: {out_path.name}")
                 else:
-                    messages.append(f"[경고] 납품서 템플릿 없음: {delivery_tpl}")
+                    messages.append(f"[경고] 납품서 템플릿 없음")
 
             if do_statement:
+                progress_callback({"msg": "거래명세표 엑셀 생성 중..."})
                 if statement_tpl.is_file():
                     out_path = out_dir / "거래명세표_자동생성.xlsx"
-                    fill_statement_template(statement_tpl, out_path, info, items_computed)
-                    messages.append(f"거래명세표: {out_path}")
+                    fill_statement_template(str(statement_tpl), str(out_path), info, items_computed)
+                    messages.append(f"거래명세표: {out_path.name}")
                 else:
-                    messages.append(f"[경고] 거래명세표 템플릿 없음: {statement_tpl}")
+                    messages.append(f"[경고] 거래명세표 템플릿 없음")
 
             if not messages:
-                QtWidgets.QMessageBox.information(self, "완료", "생성된 파일이 없습니다.")
+                return "생성된 파일이 없습니다."
+
+            # (2) 구글 드라이브 업로드
+            progress_callback({"msg": "구글 드라이브 연결 및 업로드 준비..."})
+
+            # 현재 위치 기반으로 secrets 경로 찾기 (GoogleDriveUploader 내부 로직과 맞춤)
+            current_dir = Path.cwd()
+            if (current_dir / "secrets").exists():
+                base_dir = current_dir
+            elif (current_dir.parent / "secrets").exists():
+                base_dir = current_dir.parent
             else:
-                self.status.showMessage(" / ".join(messages), 15000)
+                base_dir = Path(r"C:\my_games\excel_cal")
+
+            uploader = GoogleDriveUploader(base_dir)
+
+            # 업로드 수행 (progress_callback 전달)
+            result_msg = uploader.upload_folder(str(out_dir), folder_name, progress_callback)
+            messages.append(f"[Cloud] {result_msg}")
+
+            return "\n".join(messages)
+
+        # 3. 작업 완료 후 실행할 UI 처리
+        def on_export_done(ok, payload, err):
+            if ok:
+                self.status.showMessage("모든 작업 완료", 5000)
                 QtWidgets.QMessageBox.information(
                     self,
                     "완료",
-                    "다음 위치에 파일이 생성되었습니다.\n\n"
-                    + "\n".join(str(m) for m in messages)
-                    + "\n\n※ 기본 루트: C:\\my_games\\excel_cal\\out\\날짜_거래처명",
+                    f"다음 위치에 파일이 생성(및 업로드)되었습니다.\n\n{payload}\n\n※ 로컬 경로: {out_dir}"
                 )
+            else:
+                self.status.showMessage("오류 발생", 5000)
+                QtWidgets.QMessageBox.critical(self, "오류", f"작업 중 오류가 발생했습니다.\n{str(err)}")
 
-        except Exception as e:
-            QtWidgets.QMessageBox.critical(self, "엑셀 생성 중 오류", str(e))
+        # 4. 공통 비동기 실행기 호출
+        run_job_with_progress_async(
+            owner=self,
+            title="엑셀 생성 및 드라이브 업로드",
+            job=export_job,
+            on_done=on_export_done
+        )
 
     # ------------------------------------------------------------------
     # 버튼 핸들러
@@ -1421,6 +1597,55 @@ class ExcelCalWindow(QtWidgets.QMainWindow):
         except Exception as e:
             print(e)
             return 0
+
+    # ------------------------------------------------------------------
+    # 구글 인증 키 강제 재발급 (버튼 연결용)
+    # ------------------------------------------------------------------
+    def on_google_auth(self):
+        # 확인 팝업
+        ans = QtWidgets.QMessageBox.question(
+            self, "구글 키 인증",
+            "구글 드라이브 권한을 새로 받으시겠습니까?\n\n"
+            "[예]를 누르면 인터넷 창이 뜹니다.\n로그인 후 반드시 '모두 허용' 해주세요.",
+            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+        )
+        if ans != QtWidgets.QMessageBox.Yes:
+            return
+
+        try:
+            # 1. 경로 자동 탐지 (excel_cal/secrets 찾기)
+            current_dir = Path(__file__).resolve().parent
+            # 만약 현재 폴더에 secrets가 없으면 상위 폴더 확인
+            if (current_dir / "secrets").exists():
+                secrets_dir = current_dir / "secrets"
+            else:
+                secrets_dir = current_dir.parent / "secrets"
+
+            token_path = secrets_dir / "token.json"
+            client_secret_path = secrets_dir / "client_secret.json"
+
+            if not client_secret_path.exists():
+                QtWidgets.QMessageBox.critical(self, "오류", f"client_secret.json 파일이 없습니다.\n위치: {secrets_dir}")
+                return
+
+            # 2. 기존 토큰 삭제 (핵심)
+            if token_path.exists():
+                os.remove(token_path)
+
+            # 3. 올바른 권한으로 재인증
+            SCOPES = ['https://www.googleapis.com/auth/drive']  # .file 없음!
+
+            flow = InstalledAppFlow.from_client_secrets_file(str(client_secret_path), SCOPES)
+            creds = flow.run_local_server(port=0)
+
+            # 4. 새 토큰 저장
+            with open(token_path, 'w') as token:
+                token.write(creds.to_json())
+
+            QtWidgets.QMessageBox.information(self, "성공", "인증이 완료되었습니다!\n이제 '3종 엑셀 생성'을 누르면 업로드가 잘 될 겁니다.")
+
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "인증 실패", f"오류가 발생했습니다:\n{str(e)}")
 
     def get_df_from_password_excel(self, excelpath, password):
 
