@@ -607,6 +607,8 @@ def fill_quote_template(
     _fill_quote_total(ws, items)
     _fill_footer_totals_common(ws, items)
 
+    ws['E32'].value = "국민 801302-01-307053 (예금주:이수진)"
+
     wb.save(output_path)
 
 
@@ -623,7 +625,8 @@ def fill_delivery_template(
     _fill_common_replace(ws, info)
     _fill_dates(ws, info)
 
-    _set_value_right_of_label(ws, "사업장소재지", info.customer_name)
+    target_cell = _get_writable_cell(ws, 'M5')
+    target_cell.value = "대구 서구 고성로23길 11, 1층 상가"
     _set_value_right_of_label(ws, "공급받는자", info.customer_name)
 
     _write_items_to_sheet(ws, items)
@@ -641,18 +644,24 @@ def fill_statement_template(
     wb = load_workbook(template_path)
     ws = wb.active
 
-    _fill_common_replace(ws, info)
+    # ✅ 거래처명: 템플릿이 '거래처명' 문구가 있든 없든 무조건 덮어쓰기
+    cust_cell = _get_writable_cell(ws, "C6")  # (C6:G6) 병합의 대표 셀
+    cust_cell.value = info.customer_name
 
-    # 기존 날짜 함수 (라벨 찾는 방식) - 혹시 모르니 유지
+    # ✅ 사업장 소재지(주소): 무조건 M5를 덮어쓰기
+    addr_cell = _get_writable_cell(ws, "M5")
+    addr_cell.value = "대구 서구 고성로23길 11, 1층 상가"
+
+    # 날짜 (라벨 방식 + 한국식 분리 방식 둘 다 유지)
     _fill_dates(ws, info)
-
-    # [추가] 라벨 없이 년/월/일 글자 찾아서 날짜 바꾸는 함수 실행
     _fill_korean_style_date(ws, info.supply_date)
 
+    # 본문/합계
     _write_items_to_sheet(ws, items)
     _fill_statement_totals(ws, items)
 
     wb.save(output_path)
+
 
 
 
